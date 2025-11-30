@@ -2,7 +2,7 @@
 import { watch } from "fs"
 import { join, resolve } from "path"
 import { type ServerWebSocket, type Server } from "bun"
-import { stat, readdir } from "fs/promises"
+import { stat, readdir, mkdir } from "fs/promises"
 
 const PORT = 10080
 // 兼容不同的运行环境(Bun 使用 import.meta.dir, Node.js 使用 import.meta.dirname)
@@ -30,17 +30,50 @@ const server = Bun.serve({
             console.log(`[WS] 客户端连接`)
             clients.add(ws)
         },
-        message(ws: ServerWebSocket<unknown>, message: string | Buffer) {
+        async message(ws: ServerWebSocket<unknown>, message: string | Buffer) {
             try {
                 const msg = typeof message === 'string' ? message : message.toString()
                 const data = JSON.parse(msg)
                 switch (data.action) {
                     case 'sync_all':
-                        console.log('[WS] 收到全量同步请求')
-                        // 异步执行全量同步
+                        console.log('[WS] 收到客户端下载请求')
+                        // 异步执行发送全部文件给客户端
                         syncAllFiles(ws).catch(err => {
-                            console.error('[WS] 全量同步失败:', err)
+                            console.error('[WS] 发送全部失败:', err)
                         })
+                        break
+                    case 'client_upload_start':
+                        console.log('[WS] 客户端开始上传全部文件...')
+                        break
+                    case 'client_upload_complete':
+                        console.log('[WS] 客户端上传全部完成')
+                        break
+                    case 'update':
+                        if (data.path && data.content !== undefined) {
+                            const targetPath = join(SKINS_DIR, data.path)
+                            // 确保父目录存在
+                            const parentDir = join(targetPath, '..')
+                            await mkdir(parentDir, { recursive: true })
+
+                            // 根据编码类型处理内容
+                            if (data.encoding === 'base64') {
+                                // Base64 编码的二进制文件
+                                const buffer = Buffer.from(data.content, 'base64')
+                                await Bun.write(targetPath, buffer)
+                            } else {
+                                // 文本文件（utf-8 或默认）
+                                await Bun.write(targetPath, data.content)
+                            }
+
+                            console.log(`[WS] 客户端上传文件: ${data.path}${data.encoding === 'base64' ? ' (binary)' : ''}`)
+                        }
+                        break
+                    case 'create_dir':
+                        if (data.path) {
+                            const targetPath = join(SKINS_DIR, data.path)
+                            await mkdir(targetPath, { recursive: true })
+                            console.log(`[WS] 客户端创建目录: ${data.path}`)
+                        }
                         break
                     default:
                         console.log('[WS] 收到未知请求:', data)
@@ -73,10 +106,10 @@ function broadcast(data: any) {
 }
 
 /**
- * 向指定客户端发送整个目录的内容（全量同步）
+ * 向指定客户端发送整个目录的内容（上传全部）
  */
 async function syncAllFiles(ws: ServerWebSocket<unknown>) {
-    console.log('[WS] 开始全量同步...')
+    console.log('[WS] 开始上传全部...')
 
     // 发送同步开始消息
     ws.send(JSON.stringify({
@@ -98,9 +131,9 @@ async function syncAllFiles(ws: ServerWebSocket<unknown>) {
             isDir: false
         }))
 
-        console.log('[WS] 全量同步完成')
+        console.log('[WS] 上传全部完成')
     } catch (err) {
-        console.error('[WS] 全量同步失败:', err)
+        console.error('[WS] 上传全部失败:', err)
         ws.send(JSON.stringify({
             action: 'sync_error',
             path: '',
