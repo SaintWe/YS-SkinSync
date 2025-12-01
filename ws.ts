@@ -316,16 +316,17 @@ async function handleFileChange(eventType: string, filename: string | null) {
 
 // 开始监听
 try {
-    // recursive: true is supported on macOS
     const watcher = watch(SKINS_DIR, { recursive: true }, (event, filename) => {
         handleFileChange(event, filename)
     })
-    process.on("SIGINT", () => {
+    const shutdown = () => {
         console.log("[WS] 正在关闭服务器...")
         watcher.close()
         server.stop()
         process.exit(0)
-    })
+    }
+    process.on("SIGINT", shutdown)
+    process.on("SIGTERM", shutdown)
 } catch (error) {
     console.error(`[WS] 启动监听失败:`, error)
 }
