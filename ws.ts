@@ -12,13 +12,38 @@ console.log(`[WS] 服务启动中...`)
 console.log(`[WS] 监听目录: ${SKINS_DIR}`)
 console.log(`[WS] 监听地址: ws://0.0.0.0:${PORT}`)
 
-const clients = new Set<ServerWebSocket<unknown>>()
+// 客户端配置接口
+interface ClientConfig {
+    maxFileSize?: number
+    pathRegex?: string[]
+}
+
+// 存储客户端连接及其配置
+const clients = new Map<ServerWebSocket<unknown>, ClientConfig>()
 
 /**
  * 转Unix风格路径
  */
 function normalizePath(path: string): string {
     return path.replace(/\\/g, '/')
+}
+
+/**
+ * 检查路径是否应被过滤
+ */
+function shouldFilterPath(path: string, config: ClientConfig): boolean {
+    if (!config.pathRegex || config.pathRegex.length === 0) return false
+    const normalizedPath = normalizePath(path)
+    for (const regexStr of config.pathRegex) {
+        try {
+            const regex = new RegExp(regexStr)
+            if (regex.test(normalizedPath)) {
+                return true
+            }
+        } catch (e) {
+        }
+    }
+    return false
 }
 
 // 启动 Bun 服务器
@@ -35,7 +60,7 @@ const server = Bun.serve({
     websocket: {
         open(ws: ServerWebSocket<unknown>) {
             console.log(`[WS] 客户端连接`)
-            clients.add(ws)
+            clients.set(ws, {})
         },
         async message(ws: ServerWebSocket<unknown>, message: string | Buffer) {
             try {
@@ -48,6 +73,13 @@ const server = Bun.serve({
                         syncAllFiles(ws).catch(err => {
                             console.error('[WS] 发送全部失败:', err)
                         })
+                        break
+                    case 'configure':
+                        if (data.config) {
+                            const config = clients.get(ws) || {}
+                            clients.set(ws, { ...config, ...data.config })
+                            console.log('[WS] 更新客户端配置:', data.config)
+                        }
                         break
                     case 'client_upload_start':
                         console.log('[WS] 客户端开始上传全部文件...')
@@ -105,8 +137,37 @@ const debounceMap = new Map<string, ReturnType<typeof setTimeout>>()
  */
 function broadcast(data: any) {
     const msg = JSON.stringify(data)
-    for (const client of clients) {
+    for (const [client, config] of clients) {
         if (client.readyState === 1) { // WebSocket.OPEN is 1
+            // 检查是否应该过滤
+            if (data.path && shouldFilterPath(data.path, config)) {
+                // 发送跳过日志
+                client.send(JSON.stringify({
+                    action: 'server_log',
+                    path: data.path,
+                    status: 'warning',
+                    message: '匹配过滤规则，已跳过'
+                }))
+                console.log(`[WS] 广播: 过滤 -> ${data.path}`)
+                continue
+            }
+
+            // 如果是文件更新，检查大小限制
+            if (data.action === 'update' && data.content && config.maxFileSize) {
+                // 估算内容大小 (如果是 base64，实际大小约为 0.75 * length)
+                const size = data.content.length
+                if (size > config.maxFileSize) {
+                    // 发送跳过日志
+                    client.send(JSON.stringify({
+                        action: 'server_log',
+                        path: data.path,
+                        status: 'warning',
+                        message: `文件过大 (${(size / 1024).toFixed(1)}KB)，已跳过`
+                    }))
+                    console.log(`[WS] 广播: 文件过大跳过 -> ${data.path}`)
+                    continue
+                }
+            }
             client.send(msg)
         }
     }
@@ -164,6 +225,21 @@ async function sendDirectoryContents(ws: ServerWebSocket<unknown>, relPath: stri
             const entryRelPath = relPath ? join(relPath, entry.name) : entry.name
             const entryAbsPath = join(absPath, entry.name)
 
+            // 获取客户端配置
+            const config = clients.get(ws) || {}
+
+            // 检查是否应该过滤
+            if (shouldFilterPath(entryRelPath, config)) {
+                ws.send(JSON.stringify({
+                    action: 'server_log',
+                    path: normalizePath(entryRelPath),
+                    status: 'warning',
+                    message: '匹配过滤规则，已跳过'
+                }))
+                console.log(`[WS] 广播: 过滤 -> ${entryRelPath}`)
+                continue
+            }
+
             if (entry.isDirectory()) {
                 // 发送目录创建消息
                 ws.send(JSON.stringify({
@@ -179,6 +255,21 @@ async function sendDirectoryContents(ws: ServerWebSocket<unknown>, relPath: stri
                 // 读取并发送文件内容
                 try {
                     const file = Bun.file(entryAbsPath)
+                    const size = file.size
+                    const config = clients.get(ws)
+
+                    // 检查文件大小
+                    if (config?.maxFileSize && size > config.maxFileSize) {
+                        ws.send(JSON.stringify({
+                            action: 'server_log',
+                            path: normalizePath(entryRelPath),
+                            status: 'warning',
+                            message: `文件过大 (${(size / 1024).toFixed(1)}KB)，已跳过`
+                        }))
+                        console.log(`[WS] 广播: 文件过大跳过 -> ${entryRelPath}`)
+                        continue
+                    }
+
                     const content = await file.text()
 
                     ws.send(JSON.stringify({
