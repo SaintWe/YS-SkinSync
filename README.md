@@ -8,9 +8,13 @@
 
 - iOS 设备
 - [Scripting](https://apps.apple.com/app/scripting/id1471239139) 应用
-- Bun (用于开发环境)
+- [Bun](https://bun.com) (用于开发环境)
 
 ### 安装依赖
+
+你需要先安装 Bun，然后运行以下命令安装依赖：
+
+[前往 https://bun.com 查看安装方法](https://bun.com)
 
 ```bash
 bun i
