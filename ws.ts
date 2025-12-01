@@ -14,6 +14,13 @@ console.log(`[WS] 监听地址: ws://0.0.0.0:${PORT}`)
 
 const clients = new Set<ServerWebSocket<unknown>>()
 
+/**
+ * 转Unix风格路径
+ */
+function normalizePath(path: string): string {
+    return path.replace(/\\/g, '/')
+}
+
 // 启动 Bun 服务器
 const server = Bun.serve({
     hostname: "0.0.0.0",
@@ -161,7 +168,7 @@ async function sendDirectoryContents(ws: ServerWebSocket<unknown>, relPath: stri
                 // 发送目录创建消息
                 ws.send(JSON.stringify({
                     action: "create_dir",
-                    path: entryRelPath,
+                    path: normalizePath(entryRelPath),
                     content: null,
                     isDir: true
                 }))
@@ -176,7 +183,7 @@ async function sendDirectoryContents(ws: ServerWebSocket<unknown>, relPath: stri
 
                     ws.send(JSON.stringify({
                         action: "update",
-                        path: entryRelPath,
+                        path: normalizePath(entryRelPath),
                         content,
                         isDir: false
                     }))
@@ -208,7 +215,7 @@ async function broadcastDirectoryContents(relPath: string, absPath: string) {
                 // 广播目录创建
                 broadcast({
                     action: "create_dir",
-                    path: entryRelPath,
+                    path: normalizePath(entryRelPath),
                     content: null,
                     isDir: true
                 })
@@ -224,7 +231,7 @@ async function broadcastDirectoryContents(relPath: string, absPath: string) {
 
                     broadcast({
                         action: "update",
-                        path: entryRelPath,
+                        path: normalizePath(entryRelPath),
                         content,
                         isDir: false
                     })
@@ -288,7 +295,7 @@ async function handleFileChange(eventType: string, filename: string | null) {
 
             const payload = {
                 action,
-                path: relPath,
+                path: normalizePath(relPath),
                 content,
                 isDir
             }
