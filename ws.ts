@@ -115,11 +115,11 @@ const server = Bun.serve({
                     case 'create_dir':
                         if (data.path) {
                             const targetPath = join(SKIN_DIR, data.path)
-                            // 检查目录是否已存在
-                            const stats = await stat(targetPath)
-                            if (stats.isDirectory() || stats.isFile()) {
+                            try {
+                                // 检查目录是否已存在
+                                await stat(targetPath)
                                 console.log(`[WS] 目录已存在或存在同名文件，跳过创建: ${data.path}`)
-                            } else {
+                            } catch {
                                 await mkdir(targetPath, { recursive: true })
                                 console.log(`[WS] 客户端创建目录: ${data.path}`)
                             }
@@ -168,14 +168,15 @@ const debounceMap = new Map<string, ReturnType<typeof setTimeout>>()
  * 向指定客户端发送数据
  */
 function sendToClientJson(ws: ServerWebSocket<unknown>, data: any) {
+    if (ws.readyState !== 1) return
     ws.send(JSON.stringify(data))
 }
 
 /**
  * 向指定客户端发送警告消息
  */
-function sendToClientWarning(ws: ServerWebSocket<unknown>, path: string, message: string) {
-    sendToClientJson(ws, { action: 'server_log', path, status: 'warning', message })
+function sendToClientWarning(ws: ServerWebSocket<unknown>, title: string, message: string) {
+    sendToClientJson(ws, { action: 'server_log', path: title, status: 'warning', message })
 }
 
 /**
@@ -301,7 +302,6 @@ async function broadcastDirectoryContents(ws: ServerWebSocket<unknown>, config: 
  * 向指定客户端发送删除广播
  */
 function sendToClientDelete(ws: ServerWebSocket<unknown>, config: ClientConfig, data: any) {
-    if (ws.readyState !== 1) return
     const validation = validatePath(data.path, config)
     if (!validation.valid) {
         const action = data.action
