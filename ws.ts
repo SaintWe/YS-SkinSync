@@ -16,12 +16,35 @@ console.log(`[WS] 监听地址: ${ADDRESS}`)
 
 // 客户端配置接口
 interface ClientConfig {
+    enableFileSizeLimit?: boolean
     maxFileSize?: number
     pathRegex?: string[]
 }
 
 // 存储客户端连接及其配置
 const clients = new Map<ServerWebSocket<unknown>, ClientConfig>()
+
+// 服务端分片接收状态：Map<fileId, { path, relPath: string, receivedChunks: number, totalChunks: number }>
+const chunkReceiveState = new Map<string, { path: string, relPath: string, receivedChunks: number, totalChunks: number }>()
+
+// 记录服务端写入的文件，防止回环广播：Map<path, timer>
+const serverWrittenFiles = new Map<string, Timer>()
+
+// 服务端发送分片ACK等待：Map<fileId-chunkIndex, resolve function>
+const chunkAckWaiters = new Map<string, (success: boolean) => void>()
+
+/**
+ * 标记文件为服务端写入，在一段时间内忽略其变更事件
+ */
+function markFileAsServerWritten(relPath: string) {
+    const existing = serverWrittenFiles.get(relPath)
+    if (existing) clearTimeout(existing)
+
+    const timer = setTimeout(() => {
+        serverWrittenFiles.delete(relPath)
+    }, 2000)
+    serverWrittenFiles.set(relPath, timer)
+}
 
 /**
  * 转Unix风格路径
@@ -105,11 +128,9 @@ const server = Bun.serve({
                                 // Base64 编码的二进制文件
                                 const buffer = Buffer.from(data.content, 'base64')
                                 await Bun.write(targetPath, buffer)
-                            } else {
-                                // 文本文件（utf-8 或默认）
-                                await Bun.write(targetPath, data.content)
+                                markFileAsServerWritten(data.path)
+                                console.log(`[WS] 客户端上传文件: ${data.path}`)
                             }
-                            console.log(`[WS] 客户端上传文件: ${data.path}${data.encoding === 'base64' ? ' (binary)' : ''}`)
                         }
                         break
                     case 'create_dir':
@@ -128,6 +149,100 @@ const server = Bun.serve({
                     default:
                         console.log('[WS] 收到未知请求:', data)
                         break
+                    case 'chunk_start':
+                        if (data.fileId && data.path) {
+                            chunkReceiveState.set(data.fileId, {
+                                path: join(SKIN_DIR, data.path),
+                                relPath: data.path,
+                                receivedChunks: 0,
+                                totalChunks: data.totalChunks || 0
+                            })
+                            console.log(`[WS] 开始接收分片: ${data.path}, 总分片数: ${data.totalChunks}`)
+                        }
+                        break
+                    case 'chunk_data':
+                        if (data.fileId && data.content !== undefined && data.chunkIndex !== undefined) {
+                            const state = chunkReceiveState.get(data.fileId)
+                            if (!state) {
+                                console.error('[WS] 收到分片但未找到接收状态:', data.fileId)
+                                sendToClientJson(ws, {
+                                    action: 'chunk_ack',
+                                    fileId: data.fileId,
+                                    chunkIndex: data.chunkIndex,
+                                    success: false,
+                                    error: '未找到接收状态'
+                                })
+                                break
+                            }
+
+                            try {
+                                // 解码 base64
+                                const buffer = Buffer.from(data.content, 'base64')
+
+                                // 确保父目录存在
+                                const parentDir = join(state.path, '..')
+                                await mkdir(parentDir, { recursive: true })
+
+                                // 流式写入：第一个分片覆盖写，后续追加
+                                if (data.chunkIndex === 0) {
+                                    await Bun.write(state.path, buffer)
+                                } else {
+                                    // 追加写入
+                                    const file = Bun.file(state.path)
+                                    const existing = await file.arrayBuffer()
+                                    const combined = new Uint8Array(existing.byteLength + buffer.length)
+                                    combined.set(new Uint8Array(existing), 0)
+                                    combined.set(buffer, existing.byteLength)
+                                    await Bun.write(state.path, combined)
+                                }
+
+                                markFileAsServerWritten(state.relPath)
+
+                                state.receivedChunks++
+
+                                // 发送 ACK
+                                sendToClientJson(ws, {
+                                    action: 'chunk_ack',
+                                    fileId: data.fileId,
+                                    chunkIndex: data.chunkIndex,
+                                    success: true
+                                })
+
+                                // 每 10 个或最后一个分片输出日志
+                                if (state.receivedChunks % 10 === 0 || state.receivedChunks === state.totalChunks) {
+                                    console.log(`[WS] 接收分片: ${state.receivedChunks}/${state.totalChunks}`)
+                                }
+                            } catch (err) {
+                                console.error('[WS] 写入分片失败:', err)
+                                sendToClientJson(ws, {
+                                    action: 'chunk_ack',
+                                    fileId: data.fileId,
+                                    chunkIndex: data.chunkIndex,
+                                    success: false,
+                                    error: (err as Error).message
+                                })
+                            }
+                        }
+                        break
+                    case 'chunk_complete':
+                        if (data.fileId) {
+                            const state = chunkReceiveState.get(data.fileId)
+                            if (state) {
+                                console.log(`[WS] 客户端上传分片完成: ${data.path}, ${state.receivedChunks} 个分片`)
+                                chunkReceiveState.delete(data.fileId)
+                            }
+                        }
+                        break
+                    case 'chunk_ack':
+                        if (data.fileId && data.chunkIndex !== undefined) {
+                            const key = `${data.fileId}-${data.chunkIndex}`
+                            const resolver = chunkAckWaiters.get(key)
+                            if (resolver) {
+                                resolver(data.success !== false)
+                                chunkAckWaiters.delete(key)
+                            }
+                        }
+                        break
                 }
             } catch (err) {
                 console.error('[WS] 消息解析失败:', err)
@@ -144,7 +259,7 @@ const server = Bun.serve({
  * 验证文件大小
  */
 function validateFileSize(size: number, config: ClientConfig): { valid: boolean, reason?: string } {
-    if (config.maxFileSize && size > config.maxFileSize) {
+    if (config.enableFileSizeLimit && config.maxFileSize && size > config.maxFileSize) {
         return { valid: false, reason: `文件过大 (${(size / 1024).toFixed(1)}KB)，已跳过` }
     }
     return { valid: true }
@@ -253,19 +368,115 @@ async function processEntry(
                 return
             }
 
-            // 统一使用 Data 对象：读取为 Buffer 并转换为 base64
+            // 读取文件为 buffer 并转换为 base64
             const buffer = await file.arrayBuffer()
             const content = Buffer.from(buffer).toString('base64')
 
-            sendToClientJson(ws, {
-                action: "update",
-                path: normalizedRelPath,
-                content,
-                isDir: false,
-                encoding: 'base64'  // 所有文件都使用 base64 编码
-            })
+            // 判断是否需要分片（base64 后 > 256KB）
+            const CHUNK_SIZE = 256 * 1024
+            const needsChunking = content.length > CHUNK_SIZE
 
-            console.log(`[WS] 广播: update -> ${normalizedRelPath}`)
+            if (needsChunking) {
+                // 文件级重试循环
+                let fileSuccess = false
+                for (let fileRetry = 0; fileRetry <= 3 && !fileSuccess; fileRetry++) {
+                    if (fileRetry > 0) {
+                        console.log(`[WS] 重试文件发送: ${normalizedRelPath}, 第 ${fileRetry} 次`)
+                        // 等待一秒再重试
+                        await new Promise(resolve => setTimeout(resolve, 1000))
+                    }
+
+                    const fileId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+                    const totalChunks = Math.ceil(content.length / CHUNK_SIZE)
+
+                    try {
+                        // 发送开始消息
+                        sendToClientJson(ws, {
+                            action: 'chunk_start',
+                            path: normalizedRelPath,
+                            fileId,
+                            totalChunks,
+                            totalSize: size,
+                            isDir: false
+                        })
+
+                        console.log(`[WS] 开始发送分片: ${normalizedRelPath}, ${totalChunks} 个分片`)
+
+                        // 发送每个分片
+                        let chunkFailure = false
+                        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                            const start = chunkIndex * CHUNK_SIZE
+                            const end = Math.min(start + CHUNK_SIZE, content.length)
+                            const chunkContent = content.substring(start, end)
+
+                            sendToClientJson(ws, {
+                                action: 'chunk_data',
+                                fileId,
+                                chunkIndex,
+                                content: chunkContent
+                            })
+
+                            // 等待 ACK
+                            await new Promise<void>((resolve) => {
+                                const key = `${fileId}-${chunkIndex}`
+                                chunkAckWaiters.set(key, (success) => {
+                                    if (!success) {
+                                        console.error(`[WS] 分片 ${chunkIndex} ACK 失败 (客户端接收错误)`)
+                                        chunkFailure = true
+                                    }
+                                    resolve()
+                                })
+                                // 超时处理（5秒）
+                                setTimeout(() => {
+                                    if (chunkAckWaiters.has(key)) {
+                                        chunkAckWaiters.delete(key)
+                                        console.warn(`[WS] 分片 ${chunkIndex} ACK 超时`)
+                                        chunkFailure = true
+                                        resolve()
+                                    }
+                                }, 5000)
+                            })
+
+                            if (chunkFailure) {
+                                break // 跳出分片循环，触发文件重试
+                            }
+
+                            // 每 10 个分片输出日志
+                            if ((chunkIndex + 1) % 10 === 0 || chunkIndex === totalChunks - 1) {
+                                console.log(`[WS] 发送分片: ${chunkIndex + 1}/${totalChunks}`)
+                            }
+                        }
+
+                        if (!chunkFailure) {
+                            // 发送完成消息
+                            sendToClientJson(ws, {
+                                action: 'chunk_complete',
+                                fileId,
+                                path: normalizedRelPath
+                            })
+
+                            console.log(`[WS] 分片发送完成: ${normalizedRelPath}`)
+                            fileSuccess = true
+                        }
+                    } catch (err) {
+                        console.error(`[WS] 文件发送异常: ${normalizedRelPath}`, err)
+                    }
+                }
+
+                if (!fileSuccess) {
+                    console.error(`[WS] 文件发送失败 (多次重试后): ${normalizedRelPath}`)
+                }
+            } else {
+                // 小文件直接发送
+                sendToClientJson(ws, {
+                    action: "update",
+                    path: normalizedRelPath,
+                    content,
+                    isDir: false,
+                    encoding: 'base64'
+                })
+                console.log(`[WS] 广播: update -> ${normalizedRelPath}`)
+            }
         } catch (err) {
             console.error(`[WS] 读取文件失败 ${normalizedRelPath}:`, err)
         }
@@ -329,6 +540,12 @@ async function handleFileChange(eventType: string, filename: string | null) {
 
     // 忽略系统文件
     if (filename === ".DS_Store" || filename.endsWith(".DS_Store")) return
+
+    // 忽略服务端刚刚写入的文件（防止回环）
+    if (serverWrittenFiles.has(filename)) {
+        // console.log(`[WS] 忽略服务端写入的文件变更: ${filename}`)
+        return
+    }
 
     const relPath = filename
     const absPath = join(SKIN_DIR, relPath)
