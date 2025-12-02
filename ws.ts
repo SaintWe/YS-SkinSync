@@ -3,6 +3,7 @@ import { watch } from "fs"
 import { join, resolve } from "path"
 import { type ServerWebSocket, type Server } from "bun"
 import { stat, readdir, mkdir } from "fs/promises"
+import { version } from "./package.json"
 
 const HOST = "0.0.0.0"
 const PORT = 10080
@@ -10,6 +11,7 @@ const PORT = 10080
 const SKIN_DIR = resolve(import.meta.dirname || import.meta.dir || process.cwd(), "skin")
 const ADDRESS = `ws://${HOST}:${PORT}`
 
+console.log(`[WS] 版本: ${version}`)
 console.log(`[WS] 服务启动中...`)
 console.log(`[WS] 监听目录: ${SKIN_DIR}`)
 console.log(`[WS] 监听地址: ${ADDRESS}`)
