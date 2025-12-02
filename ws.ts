@@ -61,6 +61,11 @@ const server = Bun.serve({
     },
     websocket: {
         open(ws: ServerWebSocket<unknown>) {
+            if (clients.size > 0) {
+                console.log(`[WS] 客户端连接失败，已存在连接的客户端，不允许多个客户端连接`)
+                ws.close()
+                return
+            }
             console.log(`[WS] 客户端连接`)
             clients.set(ws, {})
         },
@@ -72,7 +77,7 @@ const server = Bun.serve({
                     case 'sync_all':
                         console.log('[WS] 收到客户端下载请求')
                         // 异步执行发送全部文件给客户端
-                        syncAllFiles(ws).catch(err => {
+                        syncAllFiles(ws, clients.get(ws) || {}).catch(err => {
                             console.error('[WS] 发送全部失败:', err)
                         })
                         break
@@ -95,7 +100,6 @@ const server = Bun.serve({
                             // 确保父目录存在
                             const parentDir = join(targetPath, '..')
                             await mkdir(parentDir, { recursive: true })
-
                             // 根据编码类型处理内容
                             if (data.encoding === 'base64') {
                                 // Base64 编码的二进制文件
@@ -105,15 +109,20 @@ const server = Bun.serve({
                                 // 文本文件（utf-8 或默认）
                                 await Bun.write(targetPath, data.content)
                             }
-
                             console.log(`[WS] 客户端上传文件: ${data.path}${data.encoding === 'base64' ? ' (binary)' : ''}`)
                         }
                         break
                     case 'create_dir':
                         if (data.path) {
                             const targetPath = join(SKIN_DIR, data.path)
-                            await mkdir(targetPath, { recursive: true })
-                            console.log(`[WS] 客户端创建目录: ${data.path}`)
+                            // 检查目录是否已存在
+                            const stats = await stat(targetPath)
+                            if (stats.isDirectory() || stats.isFile()) {
+                                console.log(`[WS] 目录已存在或存在同名文件，跳过创建: ${data.path}`)
+                            } else {
+                                await mkdir(targetPath, { recursive: true })
+                                console.log(`[WS] 客户端创建目录: ${data.path}`)
+                            }
                         }
                         break
                     default:
@@ -131,212 +140,179 @@ const server = Bun.serve({
     },
 })
 
+/**
+ * 验证文件大小
+ */
+function validateFileSize(size: number, config: ClientConfig): { valid: boolean, reason?: string } {
+    if (config.maxFileSize && size > config.maxFileSize) {
+        return { valid: false, reason: `文件过大 (${(size / 1024).toFixed(1)}KB)，已跳过` }
+    }
+    return { valid: true }
+}
+
+/**
+ * 验证路径过滤规则
+ */
+function validatePath(path: string, config: ClientConfig): { valid: boolean, reason?: string } {
+    // 1. 检查过滤规则
+    if (shouldFilterPath(path, config)) {
+        return { valid: false, reason: '匹配过滤规则，已跳过' }
+    }
+    return { valid: true }
+}
+
 // 防抖映射，用于防止同一文件的重复事件
 const debounceMap = new Map<string, ReturnType<typeof setTimeout>>()
 
 /**
- * 向所有连接的客户端广播消息
+ * 向指定客户端发送数据
  */
-function broadcast(data: any) {
-    const msg = JSON.stringify(data)
-    for (const [client, config] of clients) {
-        if (client.readyState === 1) { // WebSocket.OPEN is 1
-            // 检查是否应该过滤
-            if (data.path && shouldFilterPath(data.path, config)) {
-                // 发送跳过日志
-                client.send(JSON.stringify({
-                    action: 'server_log',
-                    path: data.path,
-                    status: 'warning',
-                    message: '匹配过滤规则，已跳过'
-                }))
-                console.log(`[WS] 广播: 过滤 -> ${data.path}`)
-                continue
-            }
+function sendToClientJson(ws: ServerWebSocket<unknown>, data: any) {
+    ws.send(JSON.stringify(data))
+}
 
-            // 如果是文件更新，检查大小限制
-            if (data.action === 'update' && data.content && config.maxFileSize) {
-                // 估算内容大小 (如果是 base64，实际大小约为 0.75 * length)
-                const size = data.content.length
-                if (size > config.maxFileSize) {
-                    // 发送跳过日志
-                    client.send(JSON.stringify({
-                        action: 'server_log',
-                        path: data.path,
-                        status: 'warning',
-                        message: `文件过大 (${(size / 1024).toFixed(1)}KB)，已跳过`
-                    }))
-                    console.log(`[WS] 广播: 文件过大跳过 -> ${data.path}`)
-                    continue
-                }
-            }
-            client.send(msg)
-        }
-    }
+/**
+ * 向指定客户端发送警告消息
+ */
+function sendToClientWarning(ws: ServerWebSocket<unknown>, path: string, message: string) {
+    sendToClientJson(ws, { action: 'server_log', path, status: 'warning', message })
 }
 
 /**
  * 向指定客户端发送整个目录的内容（上传全部）
  */
-async function syncAllFiles(ws: ServerWebSocket<unknown>) {
+async function syncAllFiles(ws: ServerWebSocket<unknown>, config: ClientConfig) {
     console.log('[WS] 开始上传全部...')
 
     // 发送同步开始消息
-    ws.send(JSON.stringify({
-        action: 'sync_start',
-        path: '',
-        content: null,
-        isDir: false
-    }))
+    sendToClientJson(ws, { action: 'sync_start', path: '', content: null, isDir: false })
 
     try {
         // 递归发送整个目录
-        await sendDirectoryContents(ws, '', SKIN_DIR)
+        await broadcastDirectoryContents(ws, config, '', SKIN_DIR)
 
         // 发送同步完成消息
-        ws.send(JSON.stringify({
+        sendToClientJson(ws, {
             action: 'sync_complete',
             path: '',
             content: null,
             isDir: false
-        }))
+        })
 
         console.log('[WS] 上传全部完成')
     } catch (err) {
         console.error('[WS] 上传全部失败:', err)
-        ws.send(JSON.stringify({
+        sendToClientJson(ws, {
             action: 'sync_error',
             path: '',
             content: (err as Error).message,
             isDir: false
-        }))
+        })
     }
 }
 
 /**
- * 递归向指定客户端发送目录内容
+ * 处理文件系统条目
  */
-async function sendDirectoryContents(ws: ServerWebSocket<unknown>, relPath: string, absPath: string) {
-    try {
-        const entries = await readdir(absPath, { withFileTypes: true })
+async function processEntry(
+    ws: ServerWebSocket<unknown>,
+    config: ClientConfig,
+    relPath: string,
+    absPath: string,
+    isDir: boolean,
+    recurse: (rel: string, abs: string) => Promise<void>,
+) {
+    const normalizedRelPath = normalizePath(relPath)
 
-        for (const entry of entries) {
-            // 忽略系统文件
-            if (entry.name === ".DS_Store") continue
-
-            const entryRelPath = relPath ? join(relPath, entry.name) : entry.name
-            const entryAbsPath = join(absPath, entry.name)
-
-            // 获取客户端配置
-            const config = clients.get(ws) || {}
-
-            // 检查是否应该过滤
-            if (shouldFilterPath(entryRelPath, config)) {
-                ws.send(JSON.stringify({
-                    action: 'server_log',
-                    path: normalizePath(entryRelPath),
-                    status: 'warning',
-                    message: '匹配过滤规则，已跳过'
-                }))
-                console.log(`[WS] 广播: 过滤 -> ${entryRelPath}`)
-                continue
-            }
-
-            if (entry.isDirectory()) {
-                // 发送目录创建消息
-                ws.send(JSON.stringify({
-                    action: "create_dir",
-                    path: normalizePath(entryRelPath),
-                    content: null,
-                    isDir: true
-                }))
-
-                // 递归处理子目录
-                await sendDirectoryContents(ws, entryRelPath, entryAbsPath)
-            } else if (entry.isFile()) {
-                // 读取并发送文件内容
-                try {
-                    const file = Bun.file(entryAbsPath)
-                    const size = file.size
-                    const config = clients.get(ws)
-
-                    // 检查文件大小
-                    if (config?.maxFileSize && size > config.maxFileSize) {
-                        ws.send(JSON.stringify({
-                            action: 'server_log',
-                            path: normalizePath(entryRelPath),
-                            status: 'warning',
-                            message: `文件过大 (${(size / 1024).toFixed(1)}KB)，已跳过`
-                        }))
-                        console.log(`[WS] 广播: 文件过大跳过 -> ${entryRelPath}`)
-                        continue
-                    }
-
-                    const content = await file.text()
-
-                    ws.send(JSON.stringify({
-                        action: "update",
-                        path: normalizePath(entryRelPath),
-                        content,
-                        isDir: false
-                    }))
-                } catch (err) {
-                    console.error(`[WS] 读取文件失败 ${entryRelPath}:`, err)
-                }
-            }
-        }
-    } catch (err) {
-        console.error(`[WS] 读取目录失败 ${relPath}:`, err)
+    // 验证路径
+    const validation = validatePath(normalizedRelPath, config)
+    if (!validation.valid) {
+        const action = isDir ? "create_dir" : "update"
+        const title = `${action} -> ${normalizedRelPath}`
+        const message = validation.reason || '路径验证失败'
+        sendToClientWarning(ws, title, message)
+        console.log(`[WS] ${message}: ${title}`)
+        return
     }
+
+    if (isDir) {
+        sendToClientJson(ws, { action: "create_dir", path: normalizedRelPath, content: null, isDir: true })
+        console.log(`[WS] 广播: create_dir -> ${normalizedRelPath}`)
+        // 递归处理子目录
+        await recurse(relPath, absPath)
+    } else {
+        try {
+            const file = Bun.file(absPath)
+            const size = file.size
+            // 验证文件大小
+            const validation = validateFileSize(size, config)
+            if (!validation.valid) {
+                sendToClientWarning(ws, normalizedRelPath, validation.reason || '文件大小验证失败')
+                console.log(`[WS] 文件过大，跳过 -> ${normalizedRelPath} (${validation.reason})`)
+                return
+            }
+            const content = await file.text()
+            sendToClientJson(ws, {
+                action: "update",
+                path: normalizedRelPath,
+                content,
+                isDir: false
+            })
+            console.log(`[WS] 广播: update -> ${normalizedRelPath}`)
+        } catch (err) {
+            console.error(`[WS] 读取文件失败 ${normalizedRelPath}:`, err)
+        }
+    }
+}
+
+/**
+ * 广播文件更新
+ */
+async function broadcastFileUpdate(ws: ServerWebSocket<unknown>, config: ClientConfig, relPath: string, absPath: string, isDir: boolean) {
+    await processEntry(
+        ws,
+        config,
+        relPath,
+        absPath,
+        isDir,
+        (rel, abs) => broadcastDirectoryContents(ws, config, rel, abs),
+    )
 }
 
 /**
  * 递归广播目录内容（用于目录创建/重命名时同步完整内容）
  */
-async function broadcastDirectoryContents(relPath: string, absPath: string) {
+async function broadcastDirectoryContents(ws: ServerWebSocket<unknown>, config: ClientConfig, relPath: string, absPath: string) {
     try {
         const entries = await readdir(absPath, { withFileTypes: true })
-
         for (const entry of entries) {
             // 忽略系统文件
             if (entry.name === ".DS_Store") continue
-
-            const entryRelPath = join(relPath, entry.name)
+            const entryRelPath = relPath ? join(relPath, entry.name) : entry.name
             const entryAbsPath = join(absPath, entry.name)
-
-            if (entry.isDirectory()) {
-                // 广播目录创建
-                broadcast({
-                    action: "create_dir",
-                    path: normalizePath(entryRelPath),
-                    content: null,
-                    isDir: true
-                })
-                console.log(`[WS] 广播: create_dir -> ${entryRelPath}`)
-
-                // 递归处理子目录
-                await broadcastDirectoryContents(entryRelPath, entryAbsPath)
-            } else if (entry.isFile()) {
-                // 读取并广播文件内容
-                try {
-                    const file = Bun.file(entryAbsPath)
-                    const content = await file.text()
-
-                    broadcast({
-                        action: "update",
-                        path: normalizePath(entryRelPath),
-                        content,
-                        isDir: false
-                    })
-                    console.log(`[WS] 广播: update -> ${entryRelPath}`)
-                } catch (err) {
-                    console.error(`[WS] 读取文件失败 ${entryRelPath}:`, err)
-                }
-            }
+            await broadcastFileUpdate(ws, config, entryRelPath, entryAbsPath, entry.isDirectory())
         }
     } catch (err) {
         console.error(`[WS] 读取目录失败 ${relPath}:`, err)
     }
+}
+
+/**
+ * 向指定客户端发送删除广播
+ */
+function sendToClientDelete(ws: ServerWebSocket<unknown>, config: ClientConfig, data: any) {
+    if (ws.readyState !== 1) return
+    const validation = validatePath(data.path, config)
+    if (!validation.valid) {
+        const action = data.action
+        const title = `${action} -> ${data.path}`
+        const message = validation.reason || '路径验证失败'
+        sendToClientWarning(ws, title, message)
+        console.log(`[WS] ${message}: ${title}`)
+        return
+    }
+    sendToClientJson(ws, data)
+    console.log(`[WS] 广播: ${data.action} -> ${data.path}`)
 }
 
 /**
@@ -361,10 +337,13 @@ async function handleFileChange(eventType: string, filename: string | null) {
     debounceMap.set(relPath, setTimeout(async () => {
         debounceMap.delete(relPath)
 
+        const ws = clients.keys().next().value
+        if (!ws) return
+        const config = clients.get(ws) || {}
+
         try {
             // 检查文件状态
             let action = "update"
-            let content: string | null = null
             let isDir = false
 
             // 先用 stat 检查，因为 Bun.file().exists() 对目录返回 false
@@ -377,28 +356,23 @@ async function handleFileChange(eventType: string, filename: string | null) {
                     action = "create_dir"
                 } else {
                     // 是文件
-                    const file = Bun.file(absPath)
-                    action = "update" // 更新或创建文件
-                    content = await file.text()
+                    action = "update"
                 }
+
+                await broadcastFileUpdate(ws, config, relPath, absPath, isDir)
+
             } catch (err) {
                 // stat 失败说明路径不存在，是删除操作
                 action = "delete"
-            }
 
-            const payload = {
-                action,
-                path: normalizePath(relPath),
-                content,
-                isDir
-            }
+                const payload = {
+                    action,
+                    path: normalizePath(relPath),
+                    content: null,
+                    isDir: false
+                }
 
-            console.log(`[WS] 广播: ${action} -> ${relPath}`)
-            broadcast(payload)
-
-            // 如果是目录创建，递归广播目录内的所有内容
-            if (action === "create_dir") {
-                await broadcastDirectoryContents(relPath, absPath)
+                sendToClientDelete(ws, config, payload)
             }
 
         } catch (error) {
