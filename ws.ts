@@ -4,13 +4,15 @@ import { join, resolve } from "path"
 import { type ServerWebSocket, type Server } from "bun"
 import { stat, readdir, mkdir } from "fs/promises"
 
+const HOST = "0.0.0.0"
 const PORT = 10080
 // 兼容不同的运行环境(Bun 使用 import.meta.dir, Node.js 使用 import.meta.dirname)
-const SKINS_DIR = resolve(import.meta.dirname || import.meta.dir || process.cwd(), "skin")
+const SKIN_DIR = resolve(import.meta.dirname || import.meta.dir || process.cwd(), "skin")
+const ADDRESS = `ws://${HOST}:${PORT}`
 
 console.log(`[WS] 服务启动中...`)
-console.log(`[WS] 监听目录: ${SKINS_DIR}`)
-console.log(`[WS] 监听地址: ws://0.0.0.0:${PORT}`)
+console.log(`[WS] 监听目录: ${SKIN_DIR}`)
+console.log(`[WS] 监听地址: ${ADDRESS}`)
 
 // 客户端配置接口
 interface ClientConfig {
@@ -48,14 +50,14 @@ function shouldFilterPath(path: string, config: ClientConfig): boolean {
 
 // 启动 Bun 服务器
 const server = Bun.serve({
-    hostname: "0.0.0.0",
+    hostname: HOST,
     port: PORT,
     fetch(req: Request, server: Server<unknown>) {
         // Upgrade to WebSocket
         if (server.upgrade(req, { data: {} })) {
             return
         }
-        return new Response(`正在监听 skins 目录，请通过 ws://0.0.0.0:${PORT} 连接`, { status: 200 })
+        return new Response(`正在监听 skin 目录，请通过 ${ADDRESS} 连接`, { status: 200 })
     },
     websocket: {
         open(ws: ServerWebSocket<unknown>) {
@@ -89,7 +91,7 @@ const server = Bun.serve({
                         break
                     case 'update':
                         if (data.path && data.content !== undefined) {
-                            const targetPath = join(SKINS_DIR, data.path)
+                            const targetPath = join(SKIN_DIR, data.path)
                             // 确保父目录存在
                             const parentDir = join(targetPath, '..')
                             await mkdir(parentDir, { recursive: true })
@@ -109,7 +111,7 @@ const server = Bun.serve({
                         break
                     case 'create_dir':
                         if (data.path) {
-                            const targetPath = join(SKINS_DIR, data.path)
+                            const targetPath = join(SKIN_DIR, data.path)
                             await mkdir(targetPath, { recursive: true })
                             console.log(`[WS] 客户端创建目录: ${data.path}`)
                         }
@@ -189,7 +191,7 @@ async function syncAllFiles(ws: ServerWebSocket<unknown>) {
 
     try {
         // 递归发送整个目录
-        await sendDirectoryContents(ws, '', SKINS_DIR)
+        await sendDirectoryContents(ws, '', SKIN_DIR)
 
         // 发送同步完成消息
         ws.send(JSON.stringify({
@@ -347,7 +349,7 @@ async function handleFileChange(eventType: string, filename: string | null) {
     if (filename === ".DS_Store" || filename.endsWith(".DS_Store")) return
 
     const relPath = filename
-    const absPath = join(SKINS_DIR, relPath)
+    const absPath = join(SKIN_DIR, relPath)
 
     // 防抖：取消同一文件的重复事件
     const existingTimer = debounceMap.get(relPath)
@@ -407,7 +409,7 @@ async function handleFileChange(eventType: string, filename: string | null) {
 
 // 开始监听
 try {
-    const watcher = watch(SKINS_DIR, { recursive: true }, (event, filename) => {
+    const watcher = watch(SKIN_DIR, { recursive: true }, (event, filename) => {
         handleFileChange(event, filename)
     })
     const shutdown = () => {
