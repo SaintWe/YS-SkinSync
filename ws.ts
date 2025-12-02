@@ -252,13 +252,19 @@ async function processEntry(
                 console.log(`[WS] 文件过大，跳过 -> ${normalizedRelPath} (${validation.reason})`)
                 return
             }
-            const content = await file.text()
+
+            // 统一使用 Data 对象：读取为 Buffer 并转换为 base64
+            const buffer = await file.arrayBuffer()
+            const content = Buffer.from(buffer).toString('base64')
+
             sendToClientJson(ws, {
                 action: "update",
                 path: normalizedRelPath,
                 content,
-                isDir: false
+                isDir: false,
+                encoding: 'base64'  // 所有文件都使用 base64 编码
             })
+
             console.log(`[WS] 广播: update -> ${normalizedRelPath}`)
         } catch (err) {
             console.error(`[WS] 读取文件失败 ${normalizedRelPath}:`, err)
