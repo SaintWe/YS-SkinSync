@@ -8,13 +8,13 @@
   "localizedNames": {},
   "contributors": [],
   "intentInputTypes": [],
-  "version": "1.1.1",
+  "version": "1.1.2",
   "color": "rgba(143, 168, 149,1)",
   "description": "",
   "remoteResource": {
     "autoUpdateInterval": null,
     "url": "https://github.com/SaintWe/YS-SkinSync/raw/refs/heads/main/script.zip",
-    "hash": "EEEB9280-F14A-49D7-88DD-45017CC670C1"
+    "hash": "E44FA943-7C82-4880-87C4-2F5CF57AE9F1"
   },
   "name": "皮肤ws同步",
   "runInApp": false,
