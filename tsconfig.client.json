@@ -1,0 +1,30 @@
+{
+    "compilerOptions": {
+        "target": "ESNext",
+        "lib": [
+            "esnext"
+        ],
+        "allowJs": true,
+        "strict": true,
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+        "forceConsistentCasingInFileNames": true,
+        "noFallthroughCasesInSwitch": true,
+        "module": "CommonJS",
+        "resolveJsonModule": true,
+        "skipLibCheck": true,
+        "jsx": "react",
+        "jsxFactory": "createElement",
+        "jsxFragmentFactory": "Fragment",
+        "baseUrl": ".",
+        "paths": {
+            "scripting": [
+                "./dts/scripting.d.ts"
+            ]
+        }
+    },
+    "include": [
+        "./dts/global.d.ts",
+        "./script/**/*"
+    ]
+}

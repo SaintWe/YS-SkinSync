@@ -23,3 +23,5 @@ stats.html
 *.sw?
 /AGENTS.md
 skin
+.agent
+

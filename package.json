@@ -1,9 +1,11 @@
 {
   "name": "ys-skin-sync",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "",
   "type": "module",
-  "scripts": {},
+  "scripts": {
+    "pack": "rm -f script.zip && cd script && zip -r ../script.zip . -x '*.DS_Store' -x '__MACOSX/*'"
+  },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
     "@types/eslint-config-prettier": "^6.11.3",
@@ -12,15 +14,17 @@
     "eslint": "^9.33.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
-    "fs-extra": "^11.3.1",
     "jiti": "^2.6.1",
     "prettier": "^3.6.2",
-    "tsx": "^4.20.4",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.39.1"
   },
   "keywords": [],
   "author": "SaintWe",
   "license": "ISC",
-  "dependencies": {}
+  "dependencies": {
+    "chokidar": "^5.0.0",
+    "fs-extra": "^11.3.1",
+    "commander": "^14.0.2"
+  }
 }
