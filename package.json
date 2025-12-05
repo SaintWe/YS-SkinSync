@@ -4,7 +4,7 @@
   "description": "",
   "type": "module",
   "scripts": {
-    "pack": "rm -f script.zip && cd script && zip -r ../script.zip . -x '*.DS_Store' -x '__MACOSX/*'"
+    "pack": "bun -e \"const fs = require('fs'); const p = 'script/script.json'; const j = JSON.parse(fs.readFileSync(p)); j.remoteResource.hash = crypto.randomUUID().toUpperCase(); const v = j.version.split('.'); v[2] = parseInt(v[2] || 0) + 1; j.version = v.join('.'); fs.writeFileSync(p, JSON.stringify(j, null, 2)); console.log('Version:', j.version)\" && rm -f script.zip && cd script && zip -r ../script.zip . -x '*.DS_Store' -x '__MACOSX/*'"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
