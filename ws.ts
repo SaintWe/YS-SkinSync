@@ -15,7 +15,7 @@ const watcher = createWatcher(clients, serverWrittenFiles, chunkAckWaiters)
 const shutdown = () => {
     watcher.close().then(() => {
         console.log('[WS] 正在关闭服务器...')
-        server.stop()
+        server.close()
         process.exit(0)
     })
 }

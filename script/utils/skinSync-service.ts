@@ -8,7 +8,7 @@ const storageManager = createStorageManager(STORAGE_NAME)
 
 export type Settings = {
   bookmark: string,
-  wsUrl: string,
+  serverUrl: string,
   customButtonTitle: string,
   customButtonUrl: string,
   pathRegex: string[],
@@ -22,7 +22,7 @@ export type Settings = {
  */
 const DEFAULT_SETTINGS: Settings = {
   bookmark: '',
-  wsUrl: 'ws://10.0.0.15:10080',
+  serverUrl: 'http://10.0.0.15:10080',
   customButtonTitle: '前往元书',
   customButtonUrl: String.raw`hamster3://com.ihsiao.apps.hamster3/keyboardSkins`,
   pathRegex: [

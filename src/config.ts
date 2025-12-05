@@ -6,7 +6,7 @@ import { version } from '../package.json'
 program
     .option('-p, --port <number>', '端口号', '10080')
     .option('-H, --host <string>', '主机地址', '0.0.0.0')
-    .option('-d, --dir <path>', '监听目录', resolve(import.meta.dirname || import.meta.dir || process.cwd(), 'skin'))
+    .option('-d, --dir <path>', '监听目录', resolve(process.cwd(), 'skin'))
     .parse()
 
 const opts = program.opts()

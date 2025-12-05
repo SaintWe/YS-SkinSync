@@ -6,7 +6,7 @@ import { ConnectionStatus } from './components/connection-status'
 import { getCurrentSettings, type Settings } from './utils'
 import { useSyncLogs } from './hooks'
 import type { FileChangeEvent, ChunkReceiveState, ChunkAckWaiter } from './types'
-import { handleFileSync, uploadAllFiles, createWSConnection, disconnectWS, cancelWSConnect, requestSyncAll } from './services'
+import { handleFileSync, uploadAllFiles, createSocketConnection, disconnectSocket, cancelSocketConnect, requestSyncAll, getSocket } from './services'
 import { version } from './script.json'
 
 /**
@@ -25,12 +25,11 @@ const Main = () => {
   const [settings, setSettings] = useState(getCurrentSettings())
 
   // Refs
-  const wsRef = useRef<WebSocket | null>(null)
+  const socketRef = useRef<SocketIOClient | null>(null)
   const targetPathRef = useRef<string | null>(null)
   const uploadingRef = useRef(false)
   const chunkReceiveStateRef = useRef(new Map<string, ChunkReceiveState>())
   const chunkAckWaitersRef = useRef(new Map<string, ChunkAckWaiter>())
-  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // 日志管理
   const { logs, addLog, clearLogs, cleanup, timerRef } = useSyncLogs()
@@ -40,20 +39,21 @@ const Main = () => {
     await handleFileSync(event, {
       uploadingRef,
       targetPathRef,
-      wsRef,
+      socketRef,
       chunkReceiveStateRef,
       chunkAckWaitersRef,
       settings,
       addLog,
-      setSyncing
+      setSyncing,
+      setUploading
     })
   }
 
   // 连接
   const connect = () => {
     if (connected || connecting) return
-    createWSConnection({
-      wsUrl: settings.wsUrl,
+    createSocketConnection({
+      serverUrl: settings.serverUrl,
       bookmark: settings.bookmark,
       settings,
       onMessage,
@@ -63,31 +63,31 @@ const Main = () => {
       setErrorMessage,
       setTargetPath,
       targetPathRef,
-      wsRef,
-      connectTimeoutRef,
-      timerRef
+      socketRef
     })
   }
 
   // 断开
   const disconnect = () => {
-    disconnectWS(wsRef, addLog)
+    disconnectSocket(socketRef, addLog)
+    setConnected(false)
+    setConnecting(false)
   }
 
   // 取消连接
   const cancelConnect = () => {
-    cancelWSConnect(wsRef, connectTimeoutRef, setConnecting, setConnected, addLog)
+    cancelSocketConnect(socketRef, setConnecting, setConnected, addLog)
   }
 
   // 下载全部
   const syncAll = () => {
-    requestSyncAll(wsRef, connected, setErrorMessage, addLog)
+    requestSyncAll(socketRef, connected, setErrorMessage, addLog)
   }
 
   // 上传全部
   const uploadAll = async () => {
     await uploadAllFiles({
-      wsRef,
+      socketRef,
       targetPathRef,
       chunkAckWaitersRef,
       settings,
@@ -123,14 +123,14 @@ const Main = () => {
     if (!showSettingsSheet) {
       const newSettings = getCurrentSettings()
       setSettings(newSettings)
-      if (wsRef.current && connected) {
-        wsRef.current.send(JSON.stringify({
-          action: 'configure',
-          config: {
-            maxFileSize: newSettings.maxFileSize,
-            pathRegex: newSettings.pathRegex
-          }
-        }))
+      // 如果已连接，发送新配置
+      const socket = getSocket()
+      if (socket && connected) {
+        socket.emit('configure', {
+          enableFileSizeLimit: newSettings.enableFileSizeLimit,
+          maxFileSize: newSettings.maxFileSize,
+          pathRegex: newSettings.pathRegex
+        })
       }
     }
   }, [showSettingsSheet])
@@ -206,7 +206,7 @@ const Main = () => {
           <ConnectionStatus
             connected={connected}
             connecting={connecting}
-            wsUrl={settings.wsUrl}
+            serverUrl={settings.serverUrl}
             targetPath={targetPath}
             errorMessage={errorMessage}
             syncing={syncing}

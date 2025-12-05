@@ -1,2 +1,2 @@
-export { handleMessage, markFileAsServerWritten } from './message'
+export { handleSocketMessage, markFileAsServerWritten, sendToClient } from './message'
 export { handleFileEvent } from './file'

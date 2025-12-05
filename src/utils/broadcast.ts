@@ -1,38 +1,48 @@
 import { join } from 'path'
 import { readdir } from 'fs/promises'
 import { SKIN_DIR } from '../config'
-import type { ClientConfig, WSClient, ChunkAckWaiters } from '../types'
+import type { ClientConfig, SocketClient, ChunkAckWaiters } from '../types'
 import { normalizePath } from './path'
 import { validateFileSize, validatePath } from './validation'
 
 /**
- * 向客户端发送 JSON 数据
+ * 检查客户端是否仍连接
  */
-export function sendToClientJson(ws: WSClient, data: unknown): void {
-    if (ws.readyState !== 1) return
-    ws.send(JSON.stringify(data))
+export function isSocketConnected(socket: SocketClient): boolean {
+    return socket.connected
+}
+
+/**
+ * 向客户端发送消息
+ */
+export function sendToClientJson(socket: SocketClient, data: { action: string;[key: string]: any }): boolean {
+    if (!socket.connected) {
+        return false
+    }
+    socket.emit(data.action, data)
+    return true
 }
 
 /**
  * 向客户端发送警告消息
  */
-export function sendToClientWarning(ws: WSClient, title: string, message: string): void {
-    sendToClientJson(ws, { action: 'server_log', path: title, status: 'warning', message })
+export function sendToClientWarning(socket: SocketClient, title: string, message: string): void {
+    sendToClientJson(socket, { action: 'server_log', path: title, status: 'warning', message })
 }
 
 /**
  * 向客户端发送删除广播
  */
-export function sendToClientDelete(ws: WSClient, config: ClientConfig, data: { action: string; path: string; content: null; isDir: boolean }): void {
+export function sendToClientDelete(socket: SocketClient, config: ClientConfig, data: { action: string; path: string; content: null; isDir: boolean }): void {
     const validation = validatePath(data.path, config)
     if (!validation.valid) {
         const title = `${data.action} -> ${data.path}`
         const message = validation.reason || '路径验证失败'
-        sendToClientWarning(ws, title, message)
+        sendToClientWarning(socket, title, message)
         console.log(`[WS] ${message}: ${title}`)
         return
     }
-    sendToClientJson(ws, data)
+    sendToClientJson(socket, data)
     console.log(`[WS] 广播: ${data.action} -> ${data.path}`)
 }
 
@@ -40,7 +50,7 @@ export function sendToClientDelete(ws: WSClient, config: ClientConfig, data: { a
  * 处理文件系统条目
  */
 export async function processEntry(
-    ws: WSClient,
+    socket: SocketClient,
     config: ClientConfig,
     relPath: string,
     absPath: string,
@@ -48,6 +58,11 @@ export async function processEntry(
     recurse: (rel: string, abs: string) => Promise<void>,
     chunkAckWaiters: ChunkAckWaiters
 ): Promise<void> {
+    // 检查客户端连接状态
+    if (!isSocketConnected(socket)) {
+        return
+    }
+
     const normalizedRelPath = normalizePath(relPath)
 
     // 验证路径
@@ -56,13 +71,13 @@ export async function processEntry(
         const action = isDir ? 'create_dir' : 'update'
         const title = `${action} -> ${normalizedRelPath}`
         const message = validation.reason || '路径验证失败'
-        sendToClientWarning(ws, title, message)
+        sendToClientWarning(socket, title, message)
         console.log(`[WS] ${message}: ${title}`)
         return
     }
 
     if (isDir) {
-        sendToClientJson(ws, { action: 'create_dir', path: normalizedRelPath, content: null, isDir: true })
+        sendToClientJson(socket, { action: 'create_dir', path: normalizedRelPath, content: null, isDir: true })
         console.log(`[WS] 广播: create_dir -> ${normalizedRelPath}`)
         await recurse(relPath, absPath)
     } else {
@@ -71,7 +86,7 @@ export async function processEntry(
             const size = file.size
             const sizeValidation = validateFileSize(size, config)
             if (!sizeValidation.valid) {
-                sendToClientWarning(ws, normalizedRelPath, sizeValidation.reason || '文件大小验证失败')
+                sendToClientWarning(socket, normalizedRelPath, sizeValidation.reason || '文件大小验证失败')
                 console.log(`[WS] 文件过大，跳过 -> ${normalizedRelPath} (${sizeValidation.reason})`)
                 return
             }
@@ -85,6 +100,12 @@ export async function processEntry(
             if (needsChunking) {
                 let fileSuccess = false
                 for (let fileRetry = 0; fileRetry <= 3 && !fileSuccess; fileRetry++) {
+                    // 检查客户端连接状态
+                    if (!isSocketConnected(socket)) {
+                        console.log(`[WS] 客户端已断开，停止发送: ${normalizedRelPath}`)
+                        return
+                    }
+
                     if (fileRetry > 0) {
                         console.log(`[WS] 重试文件发送: ${normalizedRelPath}, 第 ${fileRetry} 次`)
                         await new Promise(resolve => setTimeout(resolve, 1000))
@@ -94,7 +115,7 @@ export async function processEntry(
                     const totalChunks = Math.ceil(content.length / CHUNK_SIZE)
 
                     try {
-                        sendToClientJson(ws, {
+                        sendToClientJson(socket, {
                             action: 'chunk_start',
                             path: normalizedRelPath,
                             fileId,
@@ -107,16 +128,28 @@ export async function processEntry(
 
                         let chunkFailure = false
                         for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                            // 检查客户端连接状态
+                            if (!isSocketConnected(socket)) {
+                                console.log(`[WS] 客户端已断开，停止发送: ${normalizedRelPath}`)
+                                chunkFailure = true
+                                break
+                            }
+
                             const start = chunkIndex * CHUNK_SIZE
                             const end = Math.min(start + CHUNK_SIZE, content.length)
                             const chunkContent = content.substring(start, end)
 
-                            sendToClientJson(ws, {
+                            if (!sendToClientJson(socket, {
                                 action: 'chunk_data',
                                 fileId,
                                 chunkIndex,
-                                content: chunkContent
-                            })
+                                content: chunkContent,
+                                path: normalizedRelPath
+                            })) {
+                                console.log(`[WS] 客户端已断开，停止发送: ${normalizedRelPath}`)
+                                chunkFailure = true
+                                break
+                            }
 
                             await new Promise<void>((resolve) => {
                                 const key = `${fileId}-${chunkIndex}`
@@ -130,7 +163,11 @@ export async function processEntry(
                                 setTimeout(() => {
                                     if (chunkAckWaiters.has(key)) {
                                         chunkAckWaiters.delete(key)
-                                        console.warn(`[WS] 分片 ${chunkIndex} ACK 超时`)
+                                        if (!isSocketConnected(socket)) {
+                                            console.log(`[WS] 客户端已断开，停止等待 ACK`)
+                                        } else {
+                                            console.warn(`[WS] 分片 ${chunkIndex} ACK 超时`)
+                                        }
                                         chunkFailure = true
                                         resolve()
                                     }
@@ -139,13 +176,16 @@ export async function processEntry(
 
                             if (chunkFailure) break
 
-                            if ((chunkIndex + 1) % 10 === 0 || chunkIndex === totalChunks - 1) {
-                                console.log(`[WS] 发送分片: ${chunkIndex + 1}/${totalChunks}`)
+                            // 按百分比输出日志（每20%或最后一片）
+                            const progress = Math.floor(((chunkIndex + 1) / totalChunks) * 5)
+                            const prevProgress = Math.floor((chunkIndex / totalChunks) * 5)
+                            if (progress > prevProgress || chunkIndex === totalChunks - 1) {
+                                console.log(`[WS] 发送分片: ${chunkIndex + 1}/${totalChunks} (${Math.round(((chunkIndex + 1) / totalChunks) * 100)}%)`)
                             }
                         }
 
                         if (!chunkFailure) {
-                            sendToClientJson(ws, {
+                            sendToClientJson(socket, {
                                 action: 'chunk_complete',
                                 fileId,
                                 path: normalizedRelPath
@@ -162,7 +202,7 @@ export async function processEntry(
                     console.error(`[WS] 文件发送失败 (多次重试后): ${normalizedRelPath}`)
                 }
             } else {
-                sendToClientJson(ws, {
+                sendToClientJson(socket, {
                     action: 'update',
                     path: normalizedRelPath,
                     content,
@@ -181,7 +221,7 @@ export async function processEntry(
  * 广播文件更新
  */
 export async function broadcastFileUpdate(
-    ws: WSClient,
+    socket: SocketClient,
     config: ClientConfig,
     relPath: string,
     absPath: string,
@@ -189,12 +229,12 @@ export async function broadcastFileUpdate(
     chunkAckWaiters: ChunkAckWaiters
 ): Promise<void> {
     await processEntry(
-        ws,
+        socket,
         config,
         relPath,
         absPath,
         isDir,
-        (rel, abs) => broadcastDirectoryContents(ws, config, rel, abs, chunkAckWaiters),
+        (rel, abs) => broadcastDirectoryContents(socket, config, rel, abs, chunkAckWaiters),
         chunkAckWaiters
     )
 }
@@ -203,19 +243,30 @@ export async function broadcastFileUpdate(
  * 递归广播目录内容
  */
 export async function broadcastDirectoryContents(
-    ws: WSClient,
+    socket: SocketClient,
     config: ClientConfig,
     relPath: string,
     absPath: string,
     chunkAckWaiters: ChunkAckWaiters
 ): Promise<void> {
+    // 检查客户端连接状态
+    if (!isSocketConnected(socket)) {
+        return
+    }
+
     try {
         const entries = await readdir(absPath, { withFileTypes: true })
         for (const entry of entries) {
+            // 每个文件前检查连接状态
+            if (!isSocketConnected(socket)) {
+                console.log(`[WS] 客户端已断开，停止目录遍历`)
+                return
+            }
+
             if (entry.name === '.DS_Store') continue
             const entryRelPath = relPath ? join(relPath, entry.name) : entry.name
             const entryAbsPath = join(absPath, entry.name)
-            await broadcastFileUpdate(ws, config, entryRelPath, entryAbsPath, entry.isDirectory(), chunkAckWaiters)
+            await broadcastFileUpdate(socket, config, entryRelPath, entryAbsPath, entry.isDirectory(), chunkAckWaiters)
         }
     } catch (err) {
         console.error(`[WS] 读取目录失败 ${relPath}:`, err)
@@ -225,29 +276,35 @@ export async function broadcastDirectoryContents(
 /**
  * 同步全部文件
  */
-export async function syncAllFiles(ws: WSClient, config: ClientConfig, chunkAckWaiters: ChunkAckWaiters): Promise<void> {
+export async function syncAllFiles(socket: SocketClient, config: ClientConfig, chunkAckWaiters: ChunkAckWaiters): Promise<void> {
     console.log('[WS] 开始上传全部...')
 
-    sendToClientJson(ws, { action: 'sync_start', path: '', content: null, isDir: false })
+    sendToClientJson(socket, { action: 'sync_start', path: '', content: null, isDir: false })
 
     try {
-        await broadcastDirectoryContents(ws, config, '', SKIN_DIR, chunkAckWaiters)
+        await broadcastDirectoryContents(socket, config, '', SKIN_DIR, chunkAckWaiters)
 
-        sendToClientJson(ws, {
-            action: 'sync_complete',
-            path: '',
-            content: null,
-            isDir: false
-        })
-
-        console.log('[WS] 上传全部完成')
+        // 检查客户端连接状态
+        if (isSocketConnected(socket)) {
+            sendToClientJson(socket, {
+                action: 'sync_complete',
+                path: '',
+                content: null,
+                isDir: false
+            })
+            console.log('[WS] 上传全部完成')
+        } else {
+            console.log('[WS] 客户端已断开，上传中止')
+        }
     } catch (err) {
         console.error('[WS] 上传全部失败:', err)
-        sendToClientJson(ws, {
-            action: 'sync_error',
-            path: '',
-            content: (err as Error).message,
-            isDir: false
-        })
+        if (isSocketConnected(socket)) {
+            sendToClientJson(socket, {
+                action: 'sync_error',
+                path: '',
+                content: (err as Error).message,
+                isDir: false
+            })
+        }
     }
 }

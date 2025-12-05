@@ -23,9 +23,9 @@ export function createWatcher(
     })
 
     watcher.on('all', (event: WatchEvent, absPath: string) => {
-        const ws = clients.keys().next().value
-        const config = ws ? clients.get(ws) || {} : {}
-        handleFileEvent(event, absPath, ws, config, debounceMap, serverWrittenFiles, chunkAckWaiters)
+        const socket = clients.keys().next().value
+        const config = socket ? clients.get(socket) || {} : {}
+        handleFileEvent(event, absPath, socket, config, debounceMap, serverWrittenFiles, chunkAckWaiters)
     })
 
     watcher.on('error', error => {

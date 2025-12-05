@@ -1,6 +1,6 @@
 import { relative } from 'path'
 import { SKIN_DIR } from '../config'
-import type { WatchEvent, WSClient, ClientConfig, DebounceMap, ServerWrittenFilesMap, ChunkAckWaiters } from '../types'
+import type { WatchEvent, SocketClient, ClientConfig, DebounceMap, ServerWrittenFilesMap, ChunkAckWaiters } from '../types'
 import { normalizePath, sendToClientDelete, broadcastFileUpdate } from '../utils'
 
 /**
@@ -9,7 +9,7 @@ import { normalizePath, sendToClientDelete, broadcastFileUpdate } from '../utils
 export async function handleFileEvent(
     event: WatchEvent,
     absPath: string,
-    ws: WSClient | undefined,
+    socket: SocketClient | undefined,
     config: ClientConfig,
     debounceMap: DebounceMap,
     serverWrittenFiles: ServerWrittenFilesMap,
@@ -33,17 +33,17 @@ export async function handleFileEvent(
     debounceMap.set(relPath, setTimeout(async () => {
         debounceMap.delete(relPath)
 
-        if (!ws) return
+        if (!socket) return
 
         try {
             switch (event) {
                 case 'add':
                 case 'change':
-                    await broadcastFileUpdate(ws, config, relPath, absPath, false, chunkAckWaiters)
+                    await broadcastFileUpdate(socket, config, relPath, absPath, false, chunkAckWaiters)
                     break
 
                 case 'addDir':
-                    await broadcastFileUpdate(ws, config, relPath, absPath, true, chunkAckWaiters)
+                    await broadcastFileUpdate(socket, config, relPath, absPath, true, chunkAckWaiters)
                     break
 
                 case 'unlink':
@@ -54,7 +54,7 @@ export async function handleFileEvent(
                         content: null,
                         isDir: event === 'unlinkDir'
                     }
-                    sendToClientDelete(ws, config, payload)
+                    sendToClientDelete(socket, config, payload)
                     break
             }
         } catch (error) {

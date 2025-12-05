@@ -29,11 +29,11 @@ export const SettingsPage = () => {
     updateSettings({ ...currentSettings, bookmark })
   }
 
-  const [wsUrl, setWsUrl] = useState(currentSettings.wsUrl ?? '')
+  const [serverUrl, setWsUrl] = useState(currentSettings.serverUrl ?? '')
   const handleWsUrlChange = (value: string) => {
-    const wsUrl = removeLineBreaksAndWhitespaces(value)
-    setWsUrl(wsUrl)
-    updateSettings({ ...currentSettings, wsUrl })
+    const serverUrl = removeLineBreaksAndWhitespaces(value)
+    setWsUrl(serverUrl)
+    updateSettings({ ...currentSettings, serverUrl })
   }
 
   const [customButtonTitle, setCustomButtonTitle] = useState(currentSettings.customButtonTitle ?? '')
@@ -115,20 +115,20 @@ export const SettingsPage = () => {
         </Section>
 
         <Section
-          header={<Text font="headline">WebSocket地址</Text>}
+          header={<Text font="headline">HTTP 地址</Text>}
           footer={
             <Text font="footnote" foregroundStyle="secondaryLabel">
-              WebSocket地址
+              HTTP 地址
             </Text>
           }
         >
           <HStack>
             <TextField
-              key={'wsUrl'}
-              title="WebSocket地址"
-              value={wsUrl}
+              key={'serverUrl'}
+              title="HTTP 地址"
+              value={serverUrl}
               onChanged={(value) => handleWsUrlChange(value)}
-              prompt="请输入WebSocket地址"
+              prompt="请输入HTTP 地址"
             />
           </HStack>
         </Section>

@@ -1,4 +1,4 @@
-import type { ServerWebSocket } from 'bun'
+import type { Socket } from 'socket.io'
 
 /**
  * 客户端配置
@@ -33,14 +33,14 @@ export interface ValidationResult {
 }
 
 /**
- * WebSocket 客户端类型
+ * Socket.IO 客户端类型
  */
-export type WSClient = ServerWebSocket<unknown>
+export type SocketClient = Socket
 
 /**
  * 客户端映射类型
  */
-export type ClientsMap = Map<WSClient, ClientConfig>
+export type ClientsMap = Map<SocketClient, ClientConfig>
 
 /**
  * 分片 ACK 等待器类型
@@ -61,3 +61,4 @@ export type ServerWrittenFilesMap = Map<string, Timer>
  * 防抖映射类型
  */
 export type DebounceMap = Map<string, ReturnType<typeof setTimeout>>
+

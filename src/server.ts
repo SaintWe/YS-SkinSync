@@ -1,7 +1,7 @@
-import type { Server } from 'bun'
+import { Server as SocketIOServer } from 'socket.io'
 import { HOST, PORT, ADDRESS, VERSION } from './config'
-import type { WSClient, ClientConfig, ClientsMap, ChunkReceiveStateMap, ChunkAckWaiters, ServerWrittenFilesMap } from './types'
-import { handleMessage } from './handlers'
+import type { SocketClient, ClientConfig, ClientsMap, ChunkReceiveStateMap, ChunkAckWaiters, ServerWrittenFilesMap } from './types'
+import { handleSocketMessage } from './handlers'
 
 // 存储客户端连接及其配置
 export const clients: ClientsMap = new Map()
@@ -15,43 +15,51 @@ export const chunkAckWaiters: ChunkAckWaiters = new Map()
 // 记录服务端写入的文件（防止回环）
 export const serverWrittenFiles: ServerWrittenFilesMap = new Map()
 
+// Socket.IO 服务器实例
+let io: SocketIOServer | null = null
+
 /**
- * 创建 WebSocket 服务器
+ * 创建 Socket.IO 服务器
  */
-export function createServer(): ReturnType<typeof Bun.serve> {
+export function createServer(): SocketIOServer {
     console.log(`[WS] 版本: ${VERSION}`)
     console.log(`[WS] 服务启动中...`)
 
-    const server = Bun.serve({
-        hostname: HOST,
-        port: PORT,
-        fetch(req: Request, server: Server<unknown>) {
-            if (server.upgrade(req, { data: {} })) {
-                return
-            }
-            return new Response(`正在监听 skin 目录，请通过 ${ADDRESS} 连接`, { status: 200 })
+    io = new SocketIOServer(PORT, {
+        cors: {
+            origin: '*',
+            methods: ['GET', 'POST']
         },
-        websocket: {
-            open(ws: WSClient) {
-                if (clients.size > 0) {
-                    console.log(`[WS] 客户端连接失败，已存在连接的客户端，不允许多个客户端连接`)
-                    ws.close()
-                    return
-                }
-                console.log(`[WS] 客户端连接`)
-                clients.set(ws, {})
-            },
-            async message(ws: WSClient, message: string | Buffer) {
-                await handleMessage(ws, message, clients, chunkReceiveState, chunkAckWaiters, serverWrittenFiles)
-            },
-            close(ws: WSClient) {
-                console.log(`[WS] 客户端断开连接`)
-                clients.delete(ws)
-            },
-        },
+        transports: ['websocket', 'polling']
     })
 
-    console.log(`[WS] 监听地址: ${ADDRESS}`)
+    io.on('connection', (socket: SocketClient) => {
+        if (clients.size > 0) {
+            console.log(`[WS] 客户端连接失败，已存在连接的客户端，不允许多个客户端连接`)
+            socket.disconnect()
+            return
+        }
 
-    return server
+        console.log(`[WS] 客户端连接`)
+        clients.set(socket, {})
+
+        // 注册消息处理器
+        handleSocketMessage(socket, clients, chunkReceiveState, chunkAckWaiters, serverWrittenFiles)
+
+        socket.on('disconnect', () => {
+            console.log(`[WS] 客户端断开连接`)
+            clients.delete(socket)
+        })
+    })
+
+    console.log(`[WS] 监听地址: ws://${HOST}:${PORT}`)
+
+    return io
+}
+
+/**
+ * 获取 Socket.IO 服务器实例
+ */
+export function getIO(): SocketIOServer | null {
+    return io
 }

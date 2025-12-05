@@ -3,7 +3,7 @@ import { Button, HStack, Spacer, Text, VStack } from 'scripting'
 type ConnectionStatusProps = {
     connected: boolean
     connecting: boolean
-    wsUrl: string
+    serverUrl: string
     targetPath: string | null
     errorMessage: string
     syncing: boolean
@@ -21,7 +21,7 @@ type ConnectionStatusProps = {
 export const ConnectionStatus = ({
     connected,
     connecting,
-    wsUrl,
+    serverUrl,
     targetPath,
     errorMessage,
     syncing,
@@ -40,7 +40,7 @@ export const ConnectionStatus = ({
                 </Text>
                 <Spacer />
                 <Text font="headline" foregroundStyle="secondaryLabel">
-                    {wsUrl}
+                    {serverUrl}
                 </Text>
             </HStack>
 

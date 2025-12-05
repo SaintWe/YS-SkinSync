@@ -1,2 +1,2 @@
 export { handleFileSync, uploadAllFiles } from './file-sync'
-export { createWSConnection, disconnectWS, cancelWSConnect, requestSyncAll, type WSConnectOptions } from './ws-client'
+export { createSocketConnection, disconnectSocket, cancelSocketConnect, requestSyncAll, getSocket, type SocketConnectOptions } from './socket-client'

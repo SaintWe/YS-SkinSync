@@ -11,15 +11,16 @@ export const handleFileSync = async (
     options: {
         uploadingRef: { current: boolean }
         targetPathRef: { current: string | null }
-        wsRef: { current: WebSocket | null }
+        socketRef: { current: SocketIOClient | null }
         chunkReceiveStateRef: { current: Map<string, ChunkReceiveState> }
         chunkAckWaitersRef: { current: Map<string, ChunkAckWaiter> }
         settings: Settings
         addLog: (action: string, path: string, status: 'success' | 'error' | 'warning', message?: string) => void
         setSyncing: (syncing: boolean) => void
+        setUploading?: (uploading: boolean) => void
     }
 ): Promise<void> => {
-    const { uploadingRef, targetPathRef, wsRef, chunkReceiveStateRef, chunkAckWaitersRef, settings, addLog, setSyncing } = options
+    const { uploadingRef, targetPathRef, socketRef, chunkReceiveStateRef, chunkAckWaitersRef, settings, addLog, setSyncing, setUploading } = options
 
     // 如果正在上传，忽略来自服务端的更新消息（防止回环）
     if (uploadingRef.current && (event.action === 'update' || event.action === 'create_dir' || event.action === 'delete')) {
@@ -88,27 +89,28 @@ export const handleFileSync = async (
 
             state.receivedChunks++
 
-            if (wsRef.current) {
-                wsRef.current.send(JSON.stringify({
-                    action: 'chunk_ack',
+            if (socketRef.current) {
+                socketRef.current.emit('chunk_ack', {
                     fileId: event.fileId,
                     chunkIndex: event.chunkIndex,
                     success: true
-                }))
+                })
             }
 
-            if (state.receivedChunks % 10 === 0 || state.receivedChunks === state.totalChunks) {
-                addLog('接收分片', event.path || '未知文件', 'success', `${state.receivedChunks}/${state.totalChunks}`)
+            // 按百分比输出日志（每20%或最后一片）
+            const progress = Math.floor((state.receivedChunks / state.totalChunks) * 5)
+            const prevProgress = Math.floor(((state.receivedChunks - 1) / state.totalChunks) * 5)
+            if (progress > prevProgress || state.receivedChunks === state.totalChunks) {
+                addLog('接收分片', event.path || '未知文件', 'success', `${state.receivedChunks}/${state.totalChunks} (${Math.round((state.receivedChunks / state.totalChunks) * 100)}%)`)
             }
         } catch (error) {
-            if (wsRef.current) {
-                wsRef.current.send(JSON.stringify({
-                    action: 'chunk_ack',
+            if (socketRef.current) {
+                socketRef.current.emit('chunk_ack', {
                     fileId: event.fileId,
                     chunkIndex: event.chunkIndex,
                     success: false,
                     error: error instanceof Error ? error.message : String(error)
-                }))
+                })
             }
             const errorMsg = error instanceof Error ? error.message : String(error)
             addLog('接收分片', event.path || '未知文件', 'error', `分片 ${event.chunkIndex} 失败: ${errorMsg}`)
@@ -197,7 +199,7 @@ export const handleFileSync = async (
  */
 export const uploadAllFiles = async (
     options: {
-        wsRef: { current: WebSocket | null }
+        socketRef: { current: SocketIOClient | null }
         targetPathRef: { current: string | null }
         chunkAckWaitersRef: { current: Map<string, ChunkAckWaiter> }
         settings: Settings
@@ -206,11 +208,15 @@ export const uploadAllFiles = async (
         uploadingRef: { current: boolean }
         setErrorMessage: (message: string) => void
         connected: boolean
+        setSyncing?: (syncing: boolean) => void
     }
 ): Promise<void> => {
-    const { wsRef, targetPathRef, chunkAckWaitersRef, settings, addLog, setUploading, uploadingRef, setErrorMessage, connected } = options
+    const { socketRef, targetPathRef, chunkAckWaitersRef, settings, addLog, setUploading, uploadingRef, setErrorMessage, connected, setSyncing } = options
 
-    if (!wsRef.current || !connected) {
+    // 检查连接是否有效的辅助函数
+    const isConnected = () => socketRef.current !== null
+
+    if (!socketRef.current || !connected) {
         setErrorMessage('请先连接到服务器')
         return
     }
@@ -226,11 +232,21 @@ export const uploadAllFiles = async (
     addLog('上传全部', '开始', 'success', '正在扫描并上传文件...')
 
     try {
-        wsRef.current.send(JSON.stringify({ action: 'client_upload_start' }))
+        socketRef.current.emit('client_upload_start', {})
 
         const scanAndSend = async (dirPath: string, relPath: string) => {
+            // 检查连接状态
+            if (!isConnected()) {
+                throw new Error('连接已断开')
+            }
+
             const items = await FileManager.readDirectory(dirPath)
             for (const item of items) {
+                // 每个文件前检查连接状态
+                if (!isConnected()) {
+                    throw new Error('连接已断开')
+                }
+
                 const itemRelPath = relPath ? Path.join(relPath, item) : item
 
                 if (shouldFilterPath(itemRelPath, settings.pathRegex || [])) {
@@ -241,11 +257,10 @@ export const uploadAllFiles = async (
                 const itemPath = Path.join(dirPath, item)
 
                 if (await FileManager.isDirectory(itemPath)) {
-                    wsRef.current?.send(JSON.stringify({
-                        action: 'create_dir',
+                    socketRef.current?.emit('create_dir', {
                         path: itemRelPath,
                         isDir: true
-                    }))
+                    })
                     addLog('创建目录', itemRelPath, 'success')
                     await scanAndSend(itemPath, itemRelPath)
                 } else {
@@ -273,29 +288,32 @@ export const uploadAllFiles = async (
                             const totalChunks = Math.ceil(content.length / CHUNK_SIZE)
 
                             try {
-                                wsRef.current?.send(JSON.stringify({
-                                    action: 'chunk_start',
+                                socketRef.current?.emit('chunk_start', {
                                     path: itemRelPath,
                                     fileId,
                                     totalChunks,
                                     totalSize: stat.size,
                                     isDir: false
-                                }))
+                                })
 
                                 addLog('开始发送', itemRelPath, 'success', `${totalChunks} 个分片`)
 
                                 let chunkFailure = false
                                 for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                                    // 检查连接状态
+                                    if (!isConnected()) {
+                                        throw new Error('连接已断开')
+                                    }
+
                                     const start = chunkIndex * CHUNK_SIZE
                                     const end = Math.min(start + CHUNK_SIZE, content.length)
                                     const chunkContent = content.substring(start, end)
 
-                                    wsRef.current?.send(JSON.stringify({
-                                        action: 'chunk_data',
+                                    socketRef.current?.emit('chunk_data', {
                                         fileId,
                                         chunkIndex,
                                         content: chunkContent
-                                    }))
+                                    })
 
                                     const success = await new Promise<boolean>((resolve) => {
                                         const key = `${fileId}-${chunkIndex}`
@@ -320,11 +338,10 @@ export const uploadAllFiles = async (
                                 }
 
                                 if (!chunkFailure) {
-                                    wsRef.current?.send(JSON.stringify({
-                                        action: 'chunk_complete',
+                                    socketRef.current?.emit('chunk_complete', {
                                         fileId,
                                         path: itemRelPath
-                                    }))
+                                    })
                                     addLog('发送完成', itemRelPath, 'success')
                                     fileSuccess = true
                                 }
@@ -337,13 +354,12 @@ export const uploadAllFiles = async (
                             addLog('上传失败', itemRelPath, 'error', '多次重试后仍失败')
                         }
                     } else {
-                        wsRef.current?.send(JSON.stringify({
-                            action: 'update',
+                        socketRef.current?.emit('update', {
                             path: itemRelPath,
                             content,
                             encoding: 'base64',
                             isDir: false
-                        }))
+                        })
                         addLog('上传文件', itemRelPath, 'success')
                     }
                 }
@@ -351,15 +367,24 @@ export const uploadAllFiles = async (
         }
 
         await scanAndSend(currentTargetPath, '')
-        wsRef.current.send(JSON.stringify({ action: 'client_upload_complete' }))
 
-        await new Promise<void>(resolve => setTimeout(resolve, 500))
-        addLog('上传全部', '完成', 'success', '所有文件已上传')
+        if (isConnected()) {
+            socketRef.current!.emit('client_upload_complete', {})
+            await new Promise<void>(resolve => setTimeout(resolve, 500))
+            addLog('上传全部', '完成', 'success', '所有文件已上传')
+        }
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error)
-        addLog('上传全部', '失败', 'error', errorMsg)
+        if (errorMsg === '连接已断开') {
+            addLog('上传全部', '中断', 'warning', '连接已断开，上传已停止')
+        } else {
+            addLog('上传全部', '失败', 'error', errorMsg)
+        }
     } finally {
         setUploading(false)
         uploadingRef.current = false
+        // 清理所有等待中的 ACK
+        chunkAckWaitersRef.current.forEach((resolver) => resolver(false))
+        chunkAckWaitersRef.current.clear()
     }
 }
