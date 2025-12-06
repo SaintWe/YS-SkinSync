@@ -1,5 +1,6 @@
 import { Server as SocketIOServer } from 'socket.io'
-import { HOST, PORT, VERSION } from './config'
+import { mkdirSync, existsSync } from 'fs'
+import { HOST, PORT, VERSION, SKIN_DIR } from './config'
 import type { SocketClient, ClientsMap, ChunkReceiveStateMap, ChunkAckWaiters, ServerWrittenFilesMap } from './types'
 import { handleSocketMessage } from './handlers'
 import { log } from './utils/log'
@@ -25,6 +26,12 @@ let io: SocketIOServer | null = null
 export function createServer(): SocketIOServer {
     log(`版本: ${VERSION}`)
     log(`服务启动中...`)
+
+    // 自动创建同步目录（如果不存在）
+    if (!existsSync(SKIN_DIR)) {
+        mkdirSync(SKIN_DIR, { recursive: true })
+        log(`已创建同步目录: ${SKIN_DIR}`)
+    }
 
     io = new SocketIOServer(PORT, {
         cors: {
