@@ -36,6 +36,7 @@ export function createServer(): SocketIOServer {
     io.on('connection', (socket: SocketClient) => {
         if (clients.size > 0) {
             console.log(`[WS] 客户端连接失败，已存在连接的客户端，不允许多个客户端连接`)
+            socket.emit('connection_rejected', { message: '连接失败：已有其他客户端连接，不允许多个客户端同时连接' })
             socket.disconnect()
             return
         }

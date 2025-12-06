@@ -105,11 +105,21 @@ export const createSocketConnection = (options: SocketConnectOptions): void => {
 
         // 监听错误
         socket.on('error', (data: any[]) => {
-            const error = data[0]
+            const error = Array.isArray(data) ? data[0] : data
             console.error('[Socket.IO] 错误:', error)
             const errorMsg = `连接错误: ${error?.message || error || '未知错误'}`
             setErrorMessage(errorMsg)
             addLog('连接', '错误', 'error', errorMsg)
+        })
+
+        // 监听连接被拒绝
+        socket.on('connection_rejected', (data: any[]) => {
+            const error = Array.isArray(data) ? data[0] : data
+            console.error('[Socket.IO] 连接被拒绝:', error)
+            const errorMsg = error?.message || '连接被服务端拒绝'
+            setErrorMessage(errorMsg)
+            setConnecting(false)
+            addLog('连接', '拒绝', 'error', errorMsg)
         })
 
         // 监听各种事件并转发到 onMessage
