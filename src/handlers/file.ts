@@ -1,7 +1,7 @@
 import { relative } from 'path'
 import { SKIN_DIR } from '../config'
 import type { WatchEvent, SocketClient, ClientConfig, DebounceMap, ServerWrittenFilesMap, ChunkAckWaiters } from '../types'
-import { normalizePath, sendToClientDelete, broadcastFileUpdate } from '../utils'
+import { normalizePath, sendToClientDelete, broadcastFileUpdate, error } from '../utils'
 
 /**
  * 处理文件系统事件
@@ -57,8 +57,8 @@ export async function handleFileEvent(
                     sendToClientDelete(socket, config, payload)
                     break
             }
-        } catch (error) {
-            console.error(`[WS] 处理 ${relPath} 时出错:`, error)
+        } catch (err) {
+            error(`处理 ${relPath} 时出错:`, err)
         }
     }, 100))
 }

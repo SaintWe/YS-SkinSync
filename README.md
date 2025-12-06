@@ -2,7 +2,35 @@
 
 一个基于 **Scripting** 应用的元书输入法皮肤同步工具，工具将监听 `./skin` 目录下的文件变化，当文件变化时，工具会自动将文件发送给 Scripting。
 
-## 🚀 快速开始
+## 🚀 快速使用
+
+### Windows
+
+1. [点击下载](dist/s11esync-windows-x64.zip) 程序，解压后运行 `s11esync-windows-x64.exe` 即可
+2. 继续后续的步骤
+
+### macOS / Linux
+
+根据你的平台下载对应的二进制文件
+
+- macOS-x64: [点击下载](dist/s11esync-darwin-x64.zip)，Intel
+- macOS-arm64: [点击下载](dist/s11esync-darwin-arm64.zip)，Apple M 系列
+- Linux-x64: [点击下载](dist/s11esync-linux-x64.zip)
+- Linux-arm64: [点击下载](dist/s11esync-linux-arm64.zip)
+
+1. 下载后解压，运行 `s11esync-xxx` 即可，以解压后文件名为准
+2. 继续后续的步骤
+
+### 后续步骤
+
+1. iPhone 上安装 [Scripting](https://apps.apple.com/app/scripting/id1471239139) 应用
+2. 点击 [导入 script.zip](https://scripting.fun/import_scripts?urls=%5B%22https%3A%2F%2Fgithub.com%2FSaintWe%2FYS-SkinSync%2Fraw%2Frefs%2Fheads%2Fmain%2Fscript.zip%22%5D) 到 Scripting 中
+3. 在 Scripting 的【工具】->【文件书签】中右上角加号添加目录书签，目录指向你想同步的文件夹，设置一个你喜欢的名称
+4. 点击运行【皮肤ws同步】脚本，在脚本设置中填入你上一步创建的文件书签名称以及修改 HTTP 地址中的 IP 改为你的电脑 IP
+5. 点击连接服务器，即可开始同步，此时你在电脑端修改的文件会自动同步到手机端
+6. 修改完成后点击自定义按钮可跳转到你设定的 APP 中
+
+## 开发文档
 
 ### 环境要求
 
@@ -10,45 +38,26 @@
 - [Scripting](https://apps.apple.com/app/scripting/id1471239139) 应用
 - [Bun](https://bun.com) (用于开发环境)
 
-### 安装 Bun
-
-[前往 https://bun.com 查看安装方法](https://bun.com)
-
 ### 安装依赖
-
-你需要先安装 Bun，然后在项目目录下运行以下命令安装依赖：
 
 ```bash
 bun i
 ```
 
-### 启动文件同步
-
-在项目目录下运行以下命令启动文件同步：
+### 启动脚本开发同步
 
 ```bash
-bun ws.ts     # 启动文件同步
+bun watch.ts     # 启动脚本开发同步，默认目录是 macOS 的 iCloud，Windows 你需要手动修改源码
 ```
-
-### 皮肤文件在哪
-
-你的皮肤文件放在项目的 `./skin` 目录下
-
-### 在 Scripting 中使用
-
-1. [点击导入 script.zip](https://scripting.fun/import_scripts?urls=%5B%22https%3A%2F%2Fgithub.com%2FSaintWe%2FYS-SkinSync%2Fraw%2Frefs%2Fheads%2Fmain%2Fscript.zip%22%5D) 到 Scripting 中
-
-2. 在 Scripting 的【工具】->【文件书签】中右上角加号添加目录书签，目录指向你的皮肤文件夹(能看到 config 的位置)，设置一个你喜欢的名称
-
-3. 点击运行【皮肤ws同步】脚本，在脚本设置中填入你上一步创建的文件书签名称以及修改 WebSocket 地址中的 IP 改为你的电脑 IP
-
-4. 点击连接服务器，即可开始同步，此时你在电脑端修改的皮肤文件会自动同步到手机端
-
-5. 修改完成后点击前往元书可自动进入皮肤界面
 
 ## 更新日志
 
 ### 服务端
+
+#### v1.2.1
+
+- 已编译二进制文件，支持 Linux、macOS、Windows-x64 (不支持 x86)
+- 二进制运行需要指定同步目录，例如：`./s11esync-linux-x64 -d ./skin`
 
 #### v1.2.0
 
@@ -90,7 +99,7 @@ A: 可以，你甚至可以同步给手机任意文件夹。
 
 **Q: 为什么持续同步失败？**
 
-A: 系统可能会清理文件书签，持续发生这种问题可以在 Scripting 的文件书签中重新添加文件书签。
+A: 在你同步的 APP 更新后目录会发生变化，请重新添加文件书签。
 
 **Q: 能否发送大文件？**
 
@@ -98,7 +107,7 @@ A: 以使用分片传输，客户端以及服务端使用 v1.1.0 版本后可以
 
 **Q: 如何更新？**
 
-A: Scripting 长按脚本可以更新，服务端的话请重新 clone 或 git pull 即可。
+A: Scripting 长按脚本可以更新，服务端的话请重新下载二进制文件即可。
 
 ## 📄 许可证
 

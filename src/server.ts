@@ -1,7 +1,8 @@
 import { Server as SocketIOServer } from 'socket.io'
-import { HOST, PORT, ADDRESS, VERSION } from './config'
-import type { SocketClient, ClientConfig, ClientsMap, ChunkReceiveStateMap, ChunkAckWaiters, ServerWrittenFilesMap } from './types'
+import { HOST, PORT, VERSION } from './config'
+import type { SocketClient, ClientsMap, ChunkReceiveStateMap, ChunkAckWaiters, ServerWrittenFilesMap } from './types'
 import { handleSocketMessage } from './handlers'
+import { log } from './utils/log'
 
 // 存储客户端连接及其配置
 export const clients: ClientsMap = new Map()
@@ -22,8 +23,8 @@ let io: SocketIOServer | null = null
  * 创建 Socket.IO 服务器
  */
 export function createServer(): SocketIOServer {
-    console.log(`[WS] 版本: ${VERSION}`)
-    console.log(`[WS] 服务启动中...`)
+    log(`版本: ${VERSION}`)
+    log(`服务启动中...`)
 
     io = new SocketIOServer(PORT, {
         cors: {
@@ -35,25 +36,25 @@ export function createServer(): SocketIOServer {
 
     io.on('connection', (socket: SocketClient) => {
         if (clients.size > 0) {
-            console.log(`[WS] 客户端连接失败，已存在连接的客户端，不允许多个客户端连接`)
+            log(`客户端连接失败，已存在连接的客户端，不允许多个客户端连接`)
             socket.emit('connection_rejected', { message: '连接失败：已有其他客户端连接，不允许多个客户端同时连接' })
             socket.disconnect()
             return
         }
 
-        console.log(`[WS] 客户端连接`)
+        log(`客户端连接`)
         clients.set(socket, {})
 
         // 注册消息处理器
         handleSocketMessage(socket, clients, chunkReceiveState, chunkAckWaiters, serverWrittenFiles)
 
         socket.on('disconnect', () => {
-            console.log(`[WS] 客户端断开连接`)
+            log(`客户端断开连接`)
             clients.delete(socket)
         })
     })
 
-    console.log(`[WS] 监听地址: ws://${HOST}:${PORT}`)
+    log(`监听地址: http://${HOST}:${PORT}`)
 
     return io
 }

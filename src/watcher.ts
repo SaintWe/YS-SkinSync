@@ -2,6 +2,7 @@ import chokidar from 'chokidar'
 import { SKIN_DIR } from './config'
 import type { WatchEvent, DebounceMap, ClientsMap, ServerWrittenFilesMap, ChunkAckWaiters } from './types'
 import { handleFileEvent } from './handlers'
+import { log, error } from './utils/log'
 
 // 防抖映射
 export const debounceMap: DebounceMap = new Map()
@@ -14,10 +15,10 @@ export function createWatcher(
     serverWrittenFiles: ServerWrittenFilesMap,
     chunkAckWaiters: ChunkAckWaiters
 ): ReturnType<typeof chokidar.watch> {
-    console.log(`[WS] 监听目录: ${SKIN_DIR}`)
+    log(`监听目录: ${SKIN_DIR}`)
 
     const watcher = chokidar.watch(SKIN_DIR, {
-        ignored: /(^|[/\\])\../, // 忽略隐藏文件
+        ignored: /(^|[/\\])\.\./, // 忽略隐藏文件
         ignoreInitial: true,
         persistent: true
     })
@@ -28,8 +29,8 @@ export function createWatcher(
         handleFileEvent(event, absPath, socket, config, debounceMap, serverWrittenFiles, chunkAckWaiters)
     })
 
-    watcher.on('error', error => {
-        console.error(`[WS] 监控错误: ${error}`)
+    watcher.on('error', err => {
+        error(`监控错误: ${err}`)
     })
 
     return watcher

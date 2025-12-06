@@ -3,6 +3,7 @@ import { mkdir } from 'fs/promises'
 import { SKIN_DIR } from '../config'
 import type { SocketClient, ClientConfig, ClientsMap, ChunkReceiveStateMap, ChunkAckWaiters, ServerWrittenFilesMap } from '../types'
 import { syncAllFiles } from '../utils'
+import { log, error, logChunkProgress } from '../utils/log'
 
 /**
  * 从可能是数组的数据中提取实际数据
@@ -46,25 +47,25 @@ export function handleSocketMessage(
         const config = extractData<ClientConfig>(rawData)
         const existingConfig = clients.get(socket) || {}
         clients.set(socket, { ...existingConfig, ...config })
-        console.log('[WS] 更新客户端配置:', config)
+        log('更新客户端配置:', config)
     })
 
     // 请求下载全部
     socket.on('sync_all', () => {
-        console.log('[WS] 收到客户端下载请求')
+        log('收到客户端下载请求')
         syncAllFiles(socket, clients.get(socket) || {}, chunkAckWaiters).catch(err => {
-            console.error('[WS] 发送全部失败:', err)
+            error('发送全部失败:', err)
         })
     })
 
     // 客户端上传开始
     socket.on('client_upload_start', () => {
-        console.log('[WS] 客户端开始上传全部文件...')
+        log('客户端开始上传全部文件...')
     })
 
     // 客户端上传完成
     socket.on('client_upload_complete', () => {
-        console.log('[WS] 客户端上传全部完成')
+        log('客户端上传全部完成')
     })
 
     // 文件更新
@@ -78,7 +79,7 @@ export function handleSocketMessage(
                 const buffer = Buffer.from(data.content, 'base64')
                 await Bun.write(targetPath, buffer)
                 markFileAsServerWritten(data.path, serverWrittenFiles)
-                console.log(`[WS] 客户端上传文件: ${data.path}`)
+                log(`客户端上传文件: ${data.path}`)
             }
         }
     })
@@ -91,14 +92,14 @@ export function handleSocketMessage(
             try {
                 const exists = await Bun.file(targetPath).exists()
                 if (exists) {
-                    console.log(`[WS] 目录已存在或存在同名文件，跳过创建: ${data.path}`)
+                    log(`目录已存在或存在同名文件，跳过创建: ${data.path}`)
                 } else {
                     await mkdir(targetPath, { recursive: true })
-                    console.log(`[WS] 客户端创建目录: ${data.path}`)
+                    log(`客户端创建目录: ${data.path}`)
                 }
             } catch {
                 await mkdir(targetPath, { recursive: true })
-                console.log(`[WS] 客户端创建目录: ${data.path}`)
+                log(`客户端创建目录: ${data.path}`)
             }
         }
     })
@@ -113,7 +114,7 @@ export function handleSocketMessage(
                 receivedChunks: 0,
                 totalChunks: data.totalChunks || 0
             })
-            console.log(`[WS] 开始接收分片: ${data.path}, 总分片数: ${data.totalChunks}`)
+            log(`开始接收分片: ${data.path}, 总分片数: ${data.totalChunks}`)
         }
     })
 
@@ -123,7 +124,7 @@ export function handleSocketMessage(
         if (data?.fileId && data?.content !== undefined && data?.chunkIndex !== undefined) {
             const state = chunkReceiveState.get(data.fileId)
             if (!state) {
-                console.error('[WS] 收到分片但未找到接收状态:', data.fileId)
+                error('收到分片但未找到接收状态:', data.fileId)
                 sendToClient(socket, 'chunk_ack', {
                     fileId: data.fileId,
                     chunkIndex: data.chunkIndex,
@@ -158,14 +159,9 @@ export function handleSocketMessage(
                     success: true
                 })
 
-                // 按百分比输出日志（每20%或最后一片）
-                const progress = Math.floor((state.receivedChunks / state.totalChunks) * 5)
-                const prevProgress = Math.floor(((state.receivedChunks - 1) / state.totalChunks) * 5)
-                if (progress > prevProgress || state.receivedChunks === state.totalChunks) {
-                    console.log(`[WS] 接收分片: ${state.receivedChunks}/${state.totalChunks} (${Math.round((state.receivedChunks / state.totalChunks) * 100)}%)`)
-                }
+                logChunkProgress(state.receivedChunks, state.totalChunks, '接收分片', false)
             } catch (err) {
-                console.error('[WS] 写入分片失败:', err)
+                error('写入分片失败:', err)
                 sendToClient(socket, 'chunk_ack', {
                     fileId: data.fileId,
                     chunkIndex: data.chunkIndex,
@@ -182,13 +178,13 @@ export function handleSocketMessage(
         if (data?.fileId) {
             const state = chunkReceiveState.get(data.fileId)
             if (state) {
-                console.log(`[WS] 客户端上传分片完成: ${data.path}, ${state.receivedChunks} 个分片`)
+                log(`客户端上传分片完成: ${data.path}, ${state.receivedChunks} 个分片`)
                 chunkReceiveState.delete(data.fileId)
             }
         }
     })
 
-    // 分片 ACK (Socket.IO 传递的数据可能是数组)
+    // 分片 ACK
     socket.on('chunk_ack', (rawData: any) => {
         const data = extractData<{ fileId: string; chunkIndex: number; success: boolean }>(rawData)
         if (data?.fileId && data?.chunkIndex !== undefined) {
