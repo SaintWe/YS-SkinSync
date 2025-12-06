@@ -25,9 +25,9 @@ if (isCompiledBinary && !opts.dir && !CHECK_UPDATE_ONLY && !DOWNLOAD_UPDATE) {
     error('错误：未指定同步目录，必须使用 -d 参数指定同步目录')
     const platform = process.platform
     if (platform === 'win32') {
-        error('用法：s11esync.exe -d C:\\path\\to\\skin')
+        error('用法：f11esync.exe -d C:\\path\\to\\skin')
     } else {
-        error('用法：./s11esync -d /path/to/skin')
+        error('用法：./f11esync -d /path/to/skin')
     }
     process.exit(1)
 }

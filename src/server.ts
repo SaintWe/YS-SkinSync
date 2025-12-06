@@ -51,6 +51,17 @@ export function createServer(): SocketIOServer {
         socket.on('disconnect', () => {
             log(`客户端断开连接`)
             clients.delete(socket)
+
+            // 清理内存：清空所有缓存的 Map
+            chunkReceiveState.clear()
+            chunkAckWaiters.clear()
+
+            // 清理 serverWrittenFiles 的定时器
+            for (const timer of serverWrittenFiles.values()) {
+                clearTimeout(timer)
+            }
+            serverWrittenFiles.clear()
+
         })
     })
 

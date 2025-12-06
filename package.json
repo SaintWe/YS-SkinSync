@@ -1,16 +1,20 @@
 {
-  "name": "s11esync",
+  "name": "f11esync",
   "version": "1.2.1",
   "description": "",
   "type": "module",
   "scripts": {
     "pack": "bun -e \"const fs = require('fs'); const p = 'script/script.json'; const j = JSON.parse(fs.readFileSync(p)); j.remoteResource.hash = crypto.randomUUID().toUpperCase(); const v = j.version.split('.'); v[2] = parseInt(v[2] || 0) + 1; j.version = v.join('.'); fs.writeFileSync(p, JSON.stringify(j, null, 2)); console.log('Version:', j.version)\" && rm -f script.zip && cd script && zip -r ../script.zip . -x '*.DS_Store' -x '__MACOSX/*'",
-    "build:linux": "bun build ./ws.ts --compile --minify --target=bun-linux-x64 --outfile=dist/s11esync-linux-x64 && cd dist && zip s11esync-linux-x64.zip s11esync-linux-x64 && rm s11esync-linux-x64",
-    "build:linux-arm": "bun build ./ws.ts --compile --minify --target=bun-linux-arm64 --outfile=dist/s11esync-linux-arm64 && cd dist && zip s11esync-linux-arm64.zip s11esync-linux-arm64 && rm s11esync-linux-arm64",
-    "build:mac": "bun build ./ws.ts --compile --minify --target=bun-darwin-x64 --outfile=dist/s11esync-darwin-x64 && cd dist && zip s11esync-darwin-x64.zip s11esync-darwin-x64 && rm s11esync-darwin-x64",
-    "build:mac-arm": "bun build ./ws.ts --compile --minify --target=bun-darwin-arm64 --outfile=dist/s11esync-darwin-arm64 && cd dist && zip s11esync-darwin-arm64.zip s11esync-darwin-arm64 && rm s11esync-darwin-arm64",
-    "build:win": "bun build ./ws.ts --compile --minify --target=bun-windows-x64 --outfile=dist/s11esync-windows-x64.exe && cd dist && zip s11esync-windows-x64.zip s11esync-windows-x64.exe && rm s11esync-windows-x64.exe",
-    "build:all": "bun run build:linux && bun run build:linux-arm && bun run build:mac && bun run build:mac-arm && bun run build:win"
+    "pack:release": "bun -e \"const fs = require('fs'); const pkg = JSON.parse(fs.readFileSync('package.json')); const p = 'script/script.json'; const j = JSON.parse(fs.readFileSync(p)); j.remoteResource.hash = crypto.randomUUID().toUpperCase(); j.version = pkg.version; fs.writeFileSync(p, JSON.stringify(j, null, 2)); console.log('Version:', j.version)\" && rm -f script.zip && cd script && zip -r ../script.zip . -x '*.DS_Store' -x '__MACOSX/*'",
+    "build:linux": "bun build ./ws.ts --compile --minify --target=bun-linux-x64 --outfile=dist/f11esync-linux-x64 && cd dist && zip f11esync-linux-x64.zip f11esync-linux-x64 && rm f11esync-linux-x64",
+    "build:linux-arm": "bun build ./ws.ts --compile --minify --target=bun-linux-arm64 --outfile=dist/f11esync-linux-arm64 && cd dist && zip f11esync-linux-arm64.zip f11esync-linux-arm64 && rm f11esync-linux-arm64",
+    "build:mac": "bun build ./ws.ts --compile --minify --target=bun-darwin-x64 --outfile=dist/f11esync-darwin-x64 && cd dist && zip f11esync-darwin-x64.zip f11esync-darwin-x64 && rm f11esync-darwin-x64",
+    "build:mac-arm": "bun build ./ws.ts --compile --minify --target=bun-darwin-arm64 --outfile=dist/f11esync-darwin-arm64 && cd dist && zip f11esync-darwin-arm64.zip f11esync-darwin-arm64 && rm f11esync-darwin-arm64",
+    "build:win": "bun build ./ws.ts --compile --minify --target=bun-windows-x64 --outfile=dist/f11esync-windows-x64.exe && cd dist && zip f11esync-windows-x64.zip f11esync-windows-x64.exe && rm f11esync-windows-x64.exe",
+    "build:all": "bun run build:linux && bun run build:linux-arm && bun run build:mac && bun run build:mac-arm && bun run build:win",
+    "release": "npm version patch && git push && git push --tags",
+    "release:minor": "npm version minor && git push && git push --tags",
+    "release:major": "npm version major && git push && git push --tags"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

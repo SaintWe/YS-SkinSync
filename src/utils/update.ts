@@ -2,10 +2,9 @@ import { VERSION } from '../config'
 import { log, warn, error } from './log'
 
 const REPO_NAME = 'SaintWe/YS-SkinSync'
-const GITHUB_RAW_URL = `https://raw.githubusercontent.com/${REPO_NAME}/main/package.json`
-const GITHUB_DIST_BASE = `https://raw.githubusercontent.com/${REPO_NAME}/main/dist`
+const GITHUB_API_URL = `https://api.github.com/repos/${REPO_NAME}/releases/latest`
 const CHECK_TIMEOUT = 5000 // 5秒超时
-const DOWNLOAD_TIMEOUT = 60000 // 60秒下载超时
+const DOWNLOAD_TIMEOUT = 120000 // 120秒下载超时
 
 /**
  * 比较版本号
@@ -27,39 +26,56 @@ function compareVersions(a: string, b: string): number {
 /**
  * 获取当前平台对应的二进制文件名
  */
-function getPlatformBinaryName(): string | null {
+function getPlatformBinaryZipName(): string | null {
     const platform = process.platform
     const arch = process.arch
 
-    if (platform === 'linux' && arch === 'x64') return 's11esync-linux-x64'
-    if (platform === 'linux' && arch === 'arm64') return 's11esync-linux-arm64'
-    if (platform === 'darwin' && arch === 'x64') return 's11esync-darwin-x64'
-    if (platform === 'darwin' && arch === 'arm64') return 's11esync-darwin-arm64'
-    if (platform === 'win32' && arch === 'x64') return 's11esync-windows-x64.exe'
+    if (platform === 'linux' && arch === 'x64') return 'f11esync-linux-x64.zip'
+    if (platform === 'linux' && arch === 'arm64') return 'f11esync-linux-arm64.zip'
+    if (platform === 'darwin' && arch === 'x64') return 'f11esync-darwin-x64.zip'
+    if (platform === 'darwin' && arch === 'arm64') return 'f11esync-darwin-arm64.zip'
+    if (platform === 'win32' && arch === 'x64') return 'f11esync-windows-x64.zip'
 
     return null
+}
+
+/**
+ * 获取最新 Release 信息
+ */
+async function getLatestRelease(): Promise<{ version: string; assets: { name: string; browser_download_url: string }[] } | null> {
+    try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), CHECK_TIMEOUT)
+
+        const response = await fetch(GITHUB_API_URL, {
+            signal: controller.signal,
+            headers: {
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'f11esync'
+            }
+        })
+        clearTimeout(timeoutId)
+
+        if (!response.ok) return null
+
+        const release = await response.json() as { tag_name: string; assets: { name: string; browser_download_url: string }[] }
+        const version = release.tag_name.replace(/^v/, '')
+
+        return {
+            version,
+            assets: release.assets
+        }
+    } catch {
+        return null
+    }
 }
 
 /**
  * 获取远程版本
  */
 async function getRemoteVersion(): Promise<string | null> {
-    try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), CHECK_TIMEOUT)
-
-        const response = await fetch(GITHUB_RAW_URL, {
-            signal: controller.signal
-        })
-        clearTimeout(timeoutId)
-
-        if (!response.ok) return null
-
-        const packageJson = await response.json() as { version: string }
-        return packageJson.version
-    } catch {
-        return null
-    }
+    const release = await getLatestRelease()
+    return release?.version ?? null
 }
 
 /**
@@ -81,7 +97,7 @@ export async function checkUpdate(silent = false): Promise<void> {
 
         if (comparison > 0) {
             log(`发现新版本: v${remoteVersion} (当前: v${VERSION})`)
-            log(`下载地址: https://github.com/${REPO_NAME}/releases`)
+            log(`下载地址: https://github.com/${REPO_NAME}/releases/latest`)
         } else if (!silent) {
             log(`当前已是最新版本: v${VERSION}`)
         }
@@ -100,39 +116,49 @@ export async function checkUpdate(silent = false): Promise<void> {
  * 下载新版本
  */
 export async function downloadUpdate(): Promise<void> {
-    const binaryName = getPlatformBinaryName()
+    const zipName = getPlatformBinaryZipName()
 
-    if (!binaryName) {
+    if (!zipName) {
         error(`不支持的平台: ${process.platform}-${process.arch}`)
         return
     }
 
     log('正在检查版本...')
-    const remoteVersion = await getRemoteVersion()
+    const release = await getLatestRelease()
 
-    if (!remoteVersion) {
+    if (!release) {
         error('无法获取远程版本信息')
         return
     }
 
-    const comparison = compareVersions(remoteVersion, VERSION)
+    const comparison = compareVersions(release.version, VERSION)
 
     if (comparison <= 0) {
-        log(`当前版本 v${VERSION} 已是最新或高于仓库版本 v${remoteVersion}，无需下载`)
+        log(`当前版本 v${VERSION} 已是最新或高于远程版本 v${release.version}，无需下载`)
         return
     }
 
-    log(`发现新版本: v${remoteVersion}，开始下载...`)
+    // 查找对应平台的下载链接
+    const asset = release.assets.find(a => a.name === zipName)
+    if (!asset) {
+        error(`未找到当前平台的下载文件: ${zipName}`)
+        return
+    }
 
-    const downloadUrl = `${GITHUB_DIST_BASE}/${binaryName}`
-    const outputPath = `./${binaryName}`
+    log(`发现新版本: v${release.version}，开始下载...`)
+    log(`下载地址: ${asset.browser_download_url}`)
+
+    const outputPath = `./${zipName}`
 
     try {
         const controller = new AbortController()
         const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT)
 
-        const response = await fetch(downloadUrl, {
-            signal: controller.signal
+        const response = await fetch(asset.browser_download_url, {
+            signal: controller.signal,
+            headers: {
+                'User-Agent': 'f11esync'
+            }
         })
         clearTimeout(timeoutId)
 
@@ -144,14 +170,9 @@ export async function downloadUpdate(): Promise<void> {
         const buffer = await response.arrayBuffer()
         await Bun.write(outputPath, buffer)
 
-        // 设置可执行权限（非 Windows）
-        if (process.platform !== 'win32') {
-            const { chmod } = await import('fs/promises')
-            await chmod(outputPath, 0o755)
-        }
-
         log(`下载完成: ${outputPath}`)
-        log(`新版本: v${remoteVersion}`)
+        log(`新版本: v${release.version}`)
+        log(`请解压后替换当前程序`)
     } catch (err) {
         if ((err as Error).name === 'AbortError') {
             error('下载超时')
