@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'scripting'
 import { SettingsPage } from './components/settings-page'
 import { SyncLogList } from './components/sync-log-list'
 import { ConnectionStatus } from './components/connection-status'
-import { getCurrentSettings, type Settings } from './utils'
+import { getCurrentSettings } from './utils'
 import { useSyncLogs } from './hooks'
 import type { FileChangeEvent, ChunkReceiveState, ChunkAckWaiter } from './types'
 import { handleFileSync, uploadAllFiles, createSocketConnection, disconnectSocket, cancelSocketConnect, requestSyncAll, getSocket } from './services'
@@ -138,7 +138,7 @@ const Main = () => {
   return (
     <NavigationStack>
       <List
-        navigationTitle={`皮肤文件同步 v${version}`}
+        navigationTitle={`F11eSync v${version}`}
         navigationBarTitleDisplayMode="large"
         sheet={{
           isPresented: showManualSheet,
@@ -147,7 +147,7 @@ const Main = () => {
             <VStack presentationDragIndicator="visible" presentationDetents={[800, 'medium', 'large']} spacing={20} padding={20}>
               <Text font="headline">1. 创建文件书签</Text>
               <Text font="caption" foregroundStyle="secondaryLabel">
-                在"文件书签"工具中创建一个书签，指向要同步的目标皮肤目录
+                在"文件书签"工具中创建一个书签，指向要同步的目标目录
               </Text>
               <Text font="headline">2. 设置服务器地址和文件书签</Text>
               <Text font="caption" foregroundStyle="secondaryLabel">
@@ -155,7 +155,7 @@ const Main = () => {
               </Text>
               <Text font="headline">3. 启动服务器</Text>
               <Text font="caption" foregroundStyle="secondaryLabel">
-                在 PC/MAC 端的终端运行: bun ws.ts
+                在 PC/MAC 端的终端运行服务端，详情查看 GitHub
               </Text>
               <Text font="headline">4. 连接服务器</Text>
               <Text font="caption" foregroundStyle="secondaryLabel">
@@ -163,11 +163,11 @@ const Main = () => {
               </Text>
               <Text font="headline">5. 自动同步</Text>
               <Text font="caption" foregroundStyle="secondaryLabel">
-                PC/MAC 端监控的 skin 目录中的文件变更会自动同步到目标目录
+                PC/MAC 端监控的指定目录中的文件变更会自动同步到 Scripting
               </Text>
-              <Text font="headline">6. 前往元书</Text>
+              <Text font="headline">6. 通过自定义按钮执行操作</Text>
               <Text font="caption" foregroundStyle="secondaryLabel">
-                前往元书，点击重新加载你所修改的皮肤
+                点击自定义按钮可跳转到你设定的 APP 中
               </Text>
             </VStack>
           )
@@ -191,7 +191,7 @@ const Main = () => {
             <Button
               key="github"
               title="GitHub"
-              action={() => { Safari.openURL('https://github.com/SaintWe/YS-SkinSync') }}
+              action={() => { Safari.openURL('https://github.com/SaintWe/F11eSync') }}
             />,
             <Button
               key="tutorial"

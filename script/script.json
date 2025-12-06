@@ -5,7 +5,10 @@
     "email": "i@saintw.cc",
     "homepage": "https://github.com/SaintWe"
   },
-  "localizedNames": {},
+  "localizedNames": {
+    "en": "F11eSync",
+    "zh": "文件同步"
+  },
   "contributors": [],
   "intentInputTypes": [
     "text"
@@ -15,10 +18,13 @@
   "description": "",
   "remoteResource": {
     "autoUpdateInterval": null,
-    "url": "https://github.com/SaintWe/YS-SkinSync/releases/latest/download/script.zip",
+    "url": "https://github.com/SaintWe/F11eSync/releases/latest/download/script.zip",
     "hash": "F984F8F4-7A88-46A2-A2CF-5DF10A56D30C"
   },
-  "name": "皮肤ws同步",
+  "name": "F11eSync",
   "runInApp": false,
-  "localizedDescriptions": {}
+  "localizedDescriptions": {
+    "en": "Sync files to Scripting",
+    "zh": "同步文件到 Scripting"
+  }
 }

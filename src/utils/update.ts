@@ -1,7 +1,7 @@
 import { VERSION } from '../config'
 import { log, warn, error } from './log'
 
-const REPO_NAME = 'SaintWe/YS-SkinSync'
+const REPO_NAME = 'SaintWe/F11eSync'
 const GITHUB_API_URL = `https://api.github.com/repos/${REPO_NAME}/releases/latest`
 const CHECK_TIMEOUT = 5000 // 5秒超时
 const DOWNLOAD_TIMEOUT = 120000 // 120秒下载超时

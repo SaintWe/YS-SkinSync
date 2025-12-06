@@ -1,6 +1,6 @@
 /**
- * 此文件用于启动 S11eSync 服务器
- * 并监控皮肤文件变化，发送给客户端
+ * 此文件用于启动 F11eSync 服务器
+ * 并监控目录文件变化，发送给客户端
  */
 /// <reference types="bun-types" />
 import { createServer, createWatcher, serverWrittenFiles, chunkAckWaiters, clients } from './src'

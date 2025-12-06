@@ -17,7 +17,7 @@ const devPath = path.join(
   'iCloud~com~thomfang~Scripting',
   'Documents',
   'scripts',
-  '皮肤ws同步'
+  'F11eSync'
 )
 
 const srcDir = path.resolve('script')
